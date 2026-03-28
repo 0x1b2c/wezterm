@@ -118,8 +118,10 @@ pub trait ConnectionOps {
             pixel_max: bounds.height() as f32,
             pixel_cell: bounds.height() as f32,
         };
-        let width = geometry.width.evaluate_as_pixels(width_context) as usize;
-        let height = geometry.height.evaluate_as_pixels(height_context) as usize;
+        let width = (geometry.width.evaluate_as_pixels(width_context) as usize)
+            .min(bounds.width() as usize);
+        let height = (geometry.height.evaluate_as_pixels(height_context) as usize)
+            .min(bounds.height() as usize);
         let x = geometry
             .x
             .map(|x| x.evaluate_as_pixels(width_context) as i32 + bounds.origin.x as i32);
