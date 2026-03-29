@@ -300,6 +300,9 @@ impl RenderableInner {
     pub fn update_last_send(&mut self) {
         self.last_send_time = Instant::now();
         self.poll_interval = BASE_POLL_INTERVAL;
+        // Reset last_poll so the next render frame triggers an immediate poll,
+        // eliminating up to 20ms of latency between keystroke and screen update.
+        self.last_poll = Instant::now() - BASE_POLL_INTERVAL;
     }
 
     pub fn apply_changes_to_surface(
