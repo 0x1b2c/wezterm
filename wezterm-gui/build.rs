@@ -172,7 +172,7 @@ END
             .and_then(|s| Ok(std::path::PathBuf::from(s)))
             .unwrap_or(repo_dir.join("target").join(profile));
         let dest_plist = build_target_dir.join("Info.plist");
-        println!("cargo:rerun-if-changed=assets/macos/WezTerm.app/Contents/Info.plist");
+        println!("cargo:rerun-if-changed={}", src_plist.display());
 
         std::fs::copy(&src_plist, &dest_plist)
             .context(format!(
