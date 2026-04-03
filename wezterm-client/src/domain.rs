@@ -944,7 +944,7 @@ impl Domain for ClientDomain {
         });
         ui.title("wezterm: Connecting...");
 
-        ui.async_run_and_log_error({
+        {
             let ui = ui.clone();
             async move {
                 let mut cloned_ui = ui.clone();
@@ -976,10 +976,10 @@ impl Domain for ClientDomain {
                 ));
                 ClientDomain::finish_attach(domain_id, client, panes, window_id)
             }
-        })
+        }
         .await
         .map_err(|e| {
-            ui.output_str(&format!("Error during attach: {:#}\n", e));
+            ui.output_str(&format!("\r\nError: {:#}\r\n", e));
             e
         })?;
 
