@@ -726,27 +726,28 @@ impl Reconnectable {
 
         let exec = smol::block_on(sess.exec(&cmd, None))?;
 
+        let stderr_ui = ui.clone();
         let mut stderr = exec.stderr;
+        let mut child = exec.child;
         std::thread::spawn(move || {
-            let mut buf = [0u8; 1024];
-            while let Ok(len) = stderr.read(&mut buf) {
+            let mut buf = String::new();
+            let mut tmp = [0u8; 1024];
+            while let Ok(len) = stderr.read(&mut tmp) {
                 if len == 0 {
                     break;
-                } else {
-                    let stderr = &buf[0..len];
-                    log::error!("ssh stderr: {}", String::from_utf8_lossy(stderr));
                 }
+                let chunk = String::from_utf8_lossy(&tmp[..len]);
+                log::error!("ssh stderr: {}", chunk);
+                buf.push_str(&chunk);
             }
-        });
 
-        // This is a bit gross, but it helps to surface errors in running
-        // the proxy, and prevents us from hanging forever after the process
-        // has died
-        let mut child = exec.child;
-        std::thread::spawn(move || match child.wait() {
-            Err(err) => log::error!("waiting on {} failed: {:#}", cmd, err),
-            Ok(status) if !status.success() => log::error!("{}: {}", cmd, status),
-            _ => {}
+            match child.wait() {
+                Ok(status) if !status.success() && !buf.is_empty() => {
+                    stderr_ui.output_str(&format!("Remote: {}", buf));
+                }
+                Err(err) => log::error!("waiting on {} failed: {:#}", cmd, err),
+                _ => {}
+            }
         });
 
         let stream: Box<dyn AsyncReadAndWrite> = Box::new(Async::new(SshStream {
@@ -1226,6 +1227,10 @@ impl Client {
                     to stdout prior to running the requested command. \
                     Check your shell startup!"
                         .to_string()
+                } else if err.root_cause().is::<smol::channel::RecvError>() {
+                    "Remote command exited before responding. \
+                     Check the output above for details."
+                        .to_string()
                 } else {
                     format!(
                         "Please install the same version of wezterm on both \
@@ -1237,7 +1242,6 @@ impl Client {
                      Check your shell startup!",
                     )
                 };
-                ui.output_str(&msg);
                 bail!("{}", msg);
             }
         }
