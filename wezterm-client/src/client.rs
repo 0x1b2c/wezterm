@@ -296,7 +296,13 @@ fn process_unilateral(
             .detach();
             return Ok(());
         }
-        Pdu::TabResized(_) | Pdu::TabAddedToWindow(_) => {
+        Pdu::TabResized(_) => {
+            // TabResized doesn't change the window/tab/pane structure,
+            // only dimensions. The next GetPaneRenderChanges poll will
+            // pick up the new size, so no resync is needed.
+            return Ok(());
+        }
+        Pdu::TabAddedToWindow(_) => {
             log::trace!("resync due to {:?}", decoded.pdu);
             promise::spawn::spawn_into_main_thread(async move {
                 let mux = Mux::try_get().ok_or_else(|| anyhow!("no more mux"))?;
