@@ -979,6 +979,7 @@ impl Domain for ClientDomain {
         }
         .await
         .map_err(|e| {
+            log::info!("[fix:ssh-proxy-error] attach failed: {:#}", e);
             ui.output_str(&format!("\r\nError: {:#}\r\n", e));
             e
         })?;
