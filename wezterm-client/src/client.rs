@@ -300,6 +300,7 @@ fn process_unilateral(
             // TabResized doesn't change the window/tab/pane structure,
             // only dimensions. The next GetPaneRenderChanges poll will
             // pick up the new size, so no resync is needed.
+            log::info!("[fix:tab-resized-skip] skipping resync for TabResized");
             return Ok(());
         }
         Pdu::TabAddedToWindow(_) => {
@@ -749,6 +750,10 @@ impl Reconnectable {
 
             match child.wait() {
                 Ok(status) if !status.success() && !buf.is_empty() => {
+                    log::info!(
+                        "[fix:ssh-proxy-error] surfacing remote stderr to UI: status={:?}",
+                        status
+                    );
                     stderr_ui.output_str(&format!("Remote: {}", buf));
                 }
                 Err(err) => log::error!("waiting on {} failed: {:#}", cmd, err),
@@ -1234,6 +1239,7 @@ impl Client {
                     Check your shell startup!"
                         .to_string()
                 } else if err.root_cause().is::<smol::channel::RecvError>() {
+                    log::info!("[fix:ssh-proxy-error] remote command exited before responding");
                     "Remote command exited before responding. \
                      Check the output above for details."
                         .to_string()
