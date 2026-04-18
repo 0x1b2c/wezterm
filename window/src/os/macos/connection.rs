@@ -201,7 +201,13 @@ impl ConnectionOps for Connection {
 
 pub fn nsscreen_to_screen_info(screen: *mut Object) -> ScreenInfo {
     let frame = unsafe { NSScreen::frame(screen) };
-    let backing_frame = unsafe { NSScreen::convertRectToBacking_(screen, frame) };
+    // HACK: use visibleFrame (excludes menu bar and dock) as the reported
+    // rect so that resolve_geometry's clamp produces a window that actually
+    // fits on-screen. This changes the semantics of ScreenInfo.rect for all
+    // callers including the wezterm.gui.screens() lua API; a proper fix
+    // would add a separate visible_rect field.
+    let visible_frame = unsafe { NSScreen::visibleFrame(screen) };
+    let backing_frame = unsafe { NSScreen::convertRectToBacking_(screen, visible_frame) };
     let rect = euclid::rect(
         backing_frame.origin.x as isize,
         backing_frame.origin.y as isize,
