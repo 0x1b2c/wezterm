@@ -302,6 +302,7 @@ impl RenderableInner {
         self.poll_interval = BASE_POLL_INTERVAL;
         // Reset last_poll so the next render frame triggers an immediate poll,
         // eliminating up to 20ms of latency between keystroke and screen update.
+        log::debug!("[fix:render-poll] resetting last_poll after keystroke");
         self.last_poll = Instant::now() - BASE_POLL_INTERVAL;
     }
 
