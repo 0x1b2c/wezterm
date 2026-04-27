@@ -83,12 +83,13 @@ struct ActivePaneCacheKey {
     current_working_dir: Option<String>,
 }
 
-struct TabTitleCacheEntry {
-    key: TabTitleCacheKey,
-    value: TitleText,
-}
-
-static TAB_TITLE_CACHE: LazyLock<Mutex<HashMap<TabId, TabTitleCacheEntry>>> =
+/// One cache slot per tab is not enough: `TabBarState::new` calls
+/// `compute_tab_title` from two loops with different `(hover, tab_max_width)`
+/// inputs, so a single slot would be overwritten by each loop in turn,
+/// producing a ~0% hit rate during title-update bursts. The inner `Vec` holds
+/// the small number of variants per tab (currently two — Loop 1 and Loop 2)
+/// and is linearly scanned on lookup/insert.
+static TAB_TITLE_CACHE: LazyLock<Mutex<HashMap<TabId, Vec<(TabTitleCacheKey, TitleText)>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 static TAB_TITLE_CACHE_GENERATION: AtomicU64 = AtomicU64::new(0);
@@ -314,7 +315,8 @@ fn spinner_phase(tab_id: usize) -> u64 {
 
 /// Look up a cached title for `tab`. Returns the cached value on hit, or the
 /// freshly built cache key on miss so the caller can reuse it when storing
-/// the recomputed value.
+/// the recomputed value. Scans the per-tab variant list for an entry whose
+/// key matches the inputs exactly.
 fn lookup_cached_tab_title(
     tab: &TabInformation,
     config: &ConfigHandle,
@@ -323,26 +325,34 @@ fn lookup_cached_tab_title(
 ) -> Result<TitleText, TabTitleCacheKey> {
     let cache_key = build_tab_title_cache_key(tab, config, hover, tab_max_width);
     if let Ok(cache) = TAB_TITLE_CACHE.lock() {
-        if let Some(entry) = cache.get(&tab.tab_id) {
-            // An indeterminate spinner advances with time alone, so a title
-            // that contains one is stale even when the key still matches.
-            if entry.key == cache_key && !entry.value.has_indeterminate {
-                return Ok(entry.value.clone());
+        if let Some(entries) = cache.get(&tab.tab_id) {
+            for (key, value) in entries {
+                // An indeterminate spinner advances with time alone, so a title
+                // that contains one is stale even when the key still matches.
+                if *key == cache_key && !value.has_indeterminate {
+                    return Ok(value.clone());
+                }
             }
         }
     }
     Err(cache_key)
 }
 
+/// Store a freshly computed title in the per-tab variant list. Replaces the
+/// existing entry whose key matches (when the same call site repeats with
+/// identical inputs); otherwise appends a new variant. Entries from older
+/// cache generations are dropped here so that config reloads do not let the
+/// per-tab `Vec` grow without bound.
 fn store_cached_tab_title(tab_id: TabId, key: TabTitleCacheKey, value: &TitleText) {
     if let Ok(mut cache) = TAB_TITLE_CACHE.lock() {
-        cache.insert(
-            tab_id,
-            TabTitleCacheEntry {
-                key,
-                value: value.clone(),
-            },
-        );
+        let entries = cache.entry(tab_id).or_insert_with(Vec::new);
+        let generation = key.generation;
+        entries.retain(|(k, _)| k.generation == generation);
+        if let Some(slot) = entries.iter_mut().find(|(k, _)| *k == key) {
+            slot.1 = value.clone();
+        } else {
+            entries.push((key, value.clone()));
+        }
     }
 }
 
