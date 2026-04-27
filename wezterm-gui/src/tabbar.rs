@@ -57,7 +57,7 @@ struct TitleText {
 }
 
 /// Inputs that can change the rendered tab title. Used as a cache key to skip
-/// the expensive Lua marshalling in `call_format_tab_title` when nothing
+/// the expensive Lua marshalling in `format_tab_title_with_lua` when nothing
 /// relevant has changed (a TUI spinner emitting OSC 0/2 at 30 Hz would
 /// otherwise re-marshal every tab and pane on each frame).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -148,61 +148,76 @@ fn retain_cached_tab_titles() {
     }
 }
 
-fn call_format_tab_title(
-    tab: &TabInformation,
+/// Build the `tabs` and `panes` Lua sequences once so they can be shared
+/// across every per-tab invocation in a tab bar refresh. Constructed lazily
+/// (only when at least one tab missed the title cache) to avoid paying the
+/// marshalling cost on the all-hit path.
+fn build_lua_sequences<'lua>(
+    lua: &'lua mlua::Lua,
     tab_info: &[TabInformation],
     pane_info: &[PaneInformation],
+) -> mlua::Result<(mlua::Table<'lua>, mlua::Table<'lua>)> {
+    let tabs = lua.create_sequence_from(tab_info.iter().cloned())?;
+    let panes = lua.create_sequence_from(pane_info.iter().cloned())?;
+    Ok((tabs, panes))
+}
+
+/// Invoke the user's `format-tab-title` callback for a single tab, reusing
+/// pre-built `tabs` and `panes` Lua sequences. The shared sequences let us
+/// amortize the marshalling cost across all tabs in a window, instead of
+/// rebuilding them on every per-tab call (which would be O(N) per tab and
+/// thus O(N^2) per tab bar refresh).
+fn format_tab_title_with_lua(
+    lua: &mlua::Lua,
+    tabs: &mlua::Table,
+    panes: &mlua::Table,
+    tab: &TabInformation,
     config: &ConfigHandle,
     hover: bool,
     tab_max_width: usize,
 ) -> Option<TitleText> {
-    match config::run_immediate_with_lua_config(|lua| {
-        if let Some(lua) = lua {
-            let tabs = lua.create_sequence_from(tab_info.iter().cloned())?;
-            let panes = lua.create_sequence_from(pane_info.iter().cloned())?;
-
-            let v = config::lua::emit_sync_callback(
-                &*lua,
+    let result = (|| -> anyhow::Result<Option<TitleText>> {
+        let v = config::lua::emit_sync_callback(
+            lua,
+            (
+                "format-tab-title".to_string(),
                 (
-                    "format-tab-title".to_string(),
-                    (
-                        tab.clone(),
-                        tabs,
-                        panes,
-                        (**config).clone(),
-                        hover,
-                        tab_max_width,
-                    ),
+                    tab.clone(),
+                    tabs.clone(),
+                    panes.clone(),
+                    (**config).clone(),
+                    hover,
+                    tab_max_width,
                 ),
-            )?;
-            match &v {
-                mlua::Value::Nil => Ok(None),
-                mlua::Value::Table(_) => {
-                    let items = <Vec<FormatItem>>::from_lua(v, &*lua)?;
+            ),
+        )?;
+        match &v {
+            mlua::Value::Nil => Ok(None),
+            mlua::Value::Table(_) => {
+                let items = <Vec<FormatItem>>::from_lua(v, lua)?;
 
-                    let esc = format_as_escapes(items.clone())?;
-                    let line = parse_status_text(&esc, CellAttributes::default());
+                let esc = format_as_escapes(items.clone())?;
+                let line = parse_status_text(&esc, CellAttributes::default());
 
-                    Ok(Some(TitleText {
-                        items,
-                        len: line.len(),
-                        has_indeterminate: false,
-                    }))
-                }
-                _ => {
-                    let s = String::from_lua(v, &*lua)?;
-                    let line = parse_status_text(&s, CellAttributes::default());
-                    Ok(Some(TitleText {
-                        len: line.len(),
-                        items: vec![FormatItem::Text(s)],
-                        has_indeterminate: false,
-                    }))
-                }
+                Ok(Some(TitleText {
+                    items,
+                    len: line.len(),
+                    has_indeterminate: false,
+                }))
             }
-        } else {
-            Ok(None)
+            _ => {
+                let s = String::from_lua(v, lua)?;
+                let line = parse_status_text(&s, CellAttributes::default());
+                Ok(Some(TitleText {
+                    len: line.len(),
+                    items: vec![FormatItem::Text(s)],
+                    has_indeterminate: false,
+                }))
+            }
         }
-    }) {
+    })();
+
+    match result {
         Ok(s) => s,
         Err(err) => {
             log::warn!("format-tab-title: {}", err);
@@ -297,124 +312,215 @@ fn spinner_phase(tab_id: usize) -> u64 {
     z ^ (z >> 31)
 }
 
-fn compute_tab_title(
+/// Look up a cached title for `tab`. Returns the cached value on hit, or the
+/// freshly built cache key on miss so the caller can reuse it when storing
+/// the recomputed value.
+fn lookup_cached_tab_title(
     tab: &TabInformation,
-    tab_info: &[TabInformation],
-    pane_info: &[PaneInformation],
     config: &ConfigHandle,
     hover: bool,
     tab_max_width: usize,
-) -> TitleText {
+) -> Result<TitleText, TabTitleCacheKey> {
     let cache_key = build_tab_title_cache_key(tab, config, hover, tab_max_width);
     if let Ok(cache) = TAB_TITLE_CACHE.lock() {
         if let Some(entry) = cache.get(&tab.tab_id) {
             // An indeterminate spinner advances with time alone, so a title
             // that contains one is stale even when the key still matches.
             if entry.key == cache_key && !entry.value.has_indeterminate {
-                return entry.value.clone();
+                return Ok(entry.value.clone());
             }
         }
     }
+    Err(cache_key)
+}
 
-    let title = call_format_tab_title(tab, tab_info, pane_info, config, hover, tab_max_width);
-
-    let title_text = match title {
-        Some(title) => title,
-        None => {
-            let mut items = vec![];
-            let mut len = 0;
-            let mut has_indeterminate = false;
-
-            if let Some(pane) = &tab.active_pane {
-                let mut title = if tab.tab_title.is_empty() {
-                    pane.title.clone()
-                } else {
-                    tab.tab_title.clone()
-                };
-
-                let classic_spacing = if config.use_fancy_tab_bar { "" } else { " " };
-                if config.show_tab_index_in_tab_bar {
-                    let index = format!(
-                        "{classic_spacing}{}: ",
-                        tab.tab_index
-                            + if config.tab_and_split_indices_are_zero_based {
-                                0
-                            } else {
-                                1
-                            }
-                    );
-                    len += unicode_column_width(&index, None);
-                    items.push(FormatItem::Text(index));
-
-                    title = format!("{}{classic_spacing}", title);
-                }
-
-                match pane.progress {
-                    Progress::None => {}
-                    Progress::Percentage(pct) | Progress::Error(pct) => {
-                        let graphic = format!("{} ", pct_to_glyph(pct));
-                        len += unicode_column_width(&graphic, None);
-                        let color = if matches!(pane.progress, Progress::Percentage(_)) {
-                            FormatItem::Foreground(FormatColor::AnsiColor(AnsiColor::Green))
-                        } else {
-                            FormatItem::Foreground(FormatColor::AnsiColor(AnsiColor::Red))
-                        };
-                        items.push(color);
-                        items.push(FormatItem::Text(graphic));
-                        items.push(FormatItem::Foreground(FormatColor::Default));
-                    }
-                    Progress::Indeterminate => {
-                        has_indeterminate = true;
-                        let graphic = format!(
-                            "{} ",
-                            indeterminate_spinner_glyph(spinner_phase(tab.tab_id))
-                        );
-                        len += unicode_column_width(&graphic, None);
-                        items.push(FormatItem::Foreground(FormatColor::AnsiColor(
-                            AnsiColor::Green,
-                        )));
-                        items.push(FormatItem::Text(graphic));
-                        items.push(FormatItem::Foreground(FormatColor::Default));
-                    }
-                }
-
-                // We have a preferred soft minimum on tab width to make it
-                // easier to click on tab titles, but we'll still go below
-                // this if there are too many tabs to fit the window at
-                // this width.
-                if !config.use_fancy_tab_bar {
-                    while len + unicode_column_width(&title, None) < 5 {
-                        title.push(' ');
-                    }
-                }
-
-                len += unicode_column_width(&title, None);
-                items.push(FormatItem::Text(title));
-            } else {
-                let title = " no pane ".to_string();
-                len += unicode_column_width(&title, None);
-                items.push(FormatItem::Text(title));
-            };
-
-            TitleText {
-                len,
-                items,
-                has_indeterminate,
-            }
-        }
-    };
-
+fn store_cached_tab_title(tab_id: TabId, key: TabTitleCacheKey, value: &TitleText) {
     if let Ok(mut cache) = TAB_TITLE_CACHE.lock() {
         cache.insert(
-            tab.tab_id,
+            tab_id,
             TabTitleCacheEntry {
-                key: cache_key,
-                value: title_text.clone(),
+                key,
+                value: value.clone(),
             },
         );
     }
+}
 
+/// Built-in fallback used when there is no `format-tab-title` callback or it
+/// returns nil.
+fn default_tab_title(tab: &TabInformation, config: &ConfigHandle) -> TitleText {
+    let mut items = vec![];
+    let mut len = 0;
+    let mut has_indeterminate = false;
+
+    if let Some(pane) = &tab.active_pane {
+        let mut title = if tab.tab_title.is_empty() {
+            pane.title.clone()
+        } else {
+            tab.tab_title.clone()
+        };
+
+        let classic_spacing = if config.use_fancy_tab_bar { "" } else { " " };
+        if config.show_tab_index_in_tab_bar {
+            let index = format!(
+                "{classic_spacing}{}: ",
+                tab.tab_index
+                    + if config.tab_and_split_indices_are_zero_based {
+                        0
+                    } else {
+                        1
+                    }
+            );
+            len += unicode_column_width(&index, None);
+            items.push(FormatItem::Text(index));
+
+            title = format!("{}{classic_spacing}", title);
+        }
+
+        match pane.progress {
+            Progress::None => {}
+            Progress::Percentage(pct) | Progress::Error(pct) => {
+                let graphic = format!("{} ", pct_to_glyph(pct));
+                len += unicode_column_width(&graphic, None);
+                let color = if matches!(pane.progress, Progress::Percentage(_)) {
+                    FormatItem::Foreground(FormatColor::AnsiColor(AnsiColor::Green))
+                } else {
+                    FormatItem::Foreground(FormatColor::AnsiColor(AnsiColor::Red))
+                };
+                items.push(color);
+                items.push(FormatItem::Text(graphic));
+                items.push(FormatItem::Foreground(FormatColor::Default));
+            }
+            Progress::Indeterminate => {
+                has_indeterminate = true;
+                let graphic = format!(
+                    "{} ",
+                    indeterminate_spinner_glyph(spinner_phase(tab.tab_id))
+                );
+                len += unicode_column_width(&graphic, None);
+                items.push(FormatItem::Foreground(FormatColor::AnsiColor(
+                    AnsiColor::Green,
+                )));
+                items.push(FormatItem::Text(graphic));
+                items.push(FormatItem::Foreground(FormatColor::Default));
+            }
+        }
+
+        // We have a preferred soft minimum on tab width to make it
+        // easier to click on tab titles, but we'll still go below
+        // this if there are too many tabs to fit the window at
+        // this width.
+        if !config.use_fancy_tab_bar {
+            while len + unicode_column_width(&title, None) < 5 {
+                title.push(' ');
+            }
+        }
+
+        len += unicode_column_width(&title, None);
+        items.push(FormatItem::Text(title));
+    } else {
+        let title = " no pane ".to_string();
+        len += unicode_column_width(&title, None);
+        items.push(FormatItem::Text(title));
+    };
+
+    TitleText {
+        len,
+        items,
+        has_indeterminate,
+    }
+}
+
+/// Resolve a cache miss using a Lua context that is already entered, with
+/// `tabs` and `panes` sequences pre-built by the caller. The result is
+/// inserted into the cache before returning.
+fn compute_tab_title_uncached(
+    lua: &mlua::Lua,
+    tabs: &mlua::Table,
+    panes: &mlua::Table,
+    tab: &TabInformation,
+    config: &ConfigHandle,
+    hover: bool,
+    tab_max_width: usize,
+    cache_key: TabTitleCacheKey,
+) -> TitleText {
+    let title_text = format_tab_title_with_lua(lua, tabs, panes, tab, config, hover, tab_max_width)
+        .unwrap_or_else(|| default_tab_title(tab, config));
+    store_cached_tab_title(tab.tab_id, cache_key, &title_text);
     title_text
+}
+
+/// Resolve a cache miss when there is no Lua state available (typically the
+/// initial config load before Lua is wired up). The default fallback is used
+/// directly.
+fn compute_tab_title_no_lua(
+    tab: &TabInformation,
+    config: &ConfigHandle,
+    cache_key: TabTitleCacheKey,
+) -> TitleText {
+    let title_text = default_tab_title(tab, config);
+    store_cached_tab_title(tab.tab_id, cache_key, &title_text);
+    title_text
+}
+
+/// Fill in any cache misses in `cache_results` by entering the Lua context
+/// once and reusing a single pair of `tabs`/`panes` sequences across every
+/// missed tab. Hits stay untouched. Returns the fully resolved title list in
+/// `tab_info` order.
+fn resolve_tab_titles_with_lua(
+    cache_results: Vec<Result<TitleText, TabTitleCacheKey>>,
+    tab_info: &[TabInformation],
+    pane_info: &[PaneInformation],
+    config: &ConfigHandle,
+    hover: bool,
+    tab_max_width: usize,
+) -> Vec<TitleText> {
+    let resolved = config::run_immediate_with_lua_config(|lua| {
+        let mut lua_tables: Option<(mlua::Table, mlua::Table)> = None;
+
+        let titles: Vec<TitleText> = cache_results
+            .into_iter()
+            .enumerate()
+            .map(|(idx, result)| match result {
+                Ok(cached) => cached,
+                Err(cache_key) => {
+                    let tab = &tab_info[idx];
+                    match lua.as_deref() {
+                        Some(lua) => {
+                            let (tabs, panes) = lua_tables.get_or_insert_with(|| {
+                                build_lua_sequences(lua, tab_info, pane_info)
+                                    .expect("create_sequence_from")
+                            });
+                            compute_tab_title_uncached(
+                                lua,
+                                tabs,
+                                panes,
+                                tab,
+                                config,
+                                hover,
+                                tab_max_width,
+                                cache_key,
+                            )
+                        }
+                        None => compute_tab_title_no_lua(tab, config, cache_key),
+                    }
+                }
+            })
+            .collect();
+
+        Ok::<Vec<TitleText>, anyhow::Error>(titles)
+    });
+
+    match resolved {
+        Ok(titles) => titles,
+        Err(err) => {
+            log::warn!("format-tab-title: {}", err);
+            tab_info
+                .iter()
+                .map(|tab| default_tab_title(tab, config))
+                .collect()
+        }
+    }
 }
 
 fn is_tab_hover(mouse_x: Option<usize>, x: usize, tab_title_len: usize) -> bool {
@@ -588,22 +694,35 @@ impl TabBarState {
         let mut active_tab_no = 0;
 
         let tab_titles: Vec<TitleText> = if config.show_tabs_in_tab_bar {
-            tab_info
+            // First pass: pure cache lookup for every tab. Hits return the
+            // cached title; misses return the freshly built cache key for
+            // reuse on the slow path. Doing this without entering Lua keeps
+            // the all-hit path off the Lua thread-local entirely.
+            let cache_results: Vec<Result<TitleText, TabTitleCacheKey>> = tab_info
                 .iter()
                 .map(|tab| {
                     if tab.is_active {
                         active_tab_no = tab.tab_index;
                     }
-                    compute_tab_title(
-                        tab,
-                        tab_info,
-                        pane_info,
-                        config,
-                        false,
-                        config.tab_max_width,
-                    )
+                    lookup_cached_tab_title(tab, config, false, config.tab_max_width)
                 })
-                .collect()
+                .collect();
+
+            if cache_results.iter().any(|r| r.is_err()) {
+                resolve_tab_titles_with_lua(
+                    cache_results,
+                    tab_info,
+                    pane_info,
+                    config,
+                    false,
+                    config.tab_max_width,
+                )
+            } else {
+                cache_results
+                    .into_iter()
+                    .map(|r| r.expect("all entries verified hit"))
+                    .collect()
+            }
         } else {
             vec![]
         };
@@ -663,60 +782,93 @@ impl TabBarState {
             line.append_line(left_status_line, SEQ_ZERO);
         }
 
-        for (tab_idx, tab_title) in tab_titles.iter().enumerate() {
-            let tab_title_len = tab_title.len.min(tab_width_max);
-            let active = tab_idx == active_tab_no;
-            let hover = !active && is_tab_hover(mouse_x, x, tab_title_len);
+        // The render loop's `hover` value depends on the cumulative `x`
+        // position which only finalises after each tab is rendered, so we
+        // cannot batch the lookups the way loop 1 does. Instead we enter the
+        // Lua context once around the whole loop and build the shared
+        // `tabs`/`panes` sequences lazily on the first cache miss. All-hit
+        // iterations therefore avoid the marshalling cost entirely. The
+        // outer `if` skips the Lua entry when there are no tabs to render.
+        if !tab_titles.is_empty() {
+            let _ = config::run_immediate_with_lua_config(|lua| {
+                let mut lua_tables: Option<(mlua::Table, mlua::Table)> = None;
 
-            // Recompute the title so that it factors in both the hover state
-            // and the adjusted maximum tab width based on available space.
-            let tab_title = compute_tab_title(
-                &tab_info[tab_idx],
-                tab_info,
-                pane_info,
-                config,
-                hover,
-                tab_title_len,
-            );
+                for (tab_idx, tab_title) in tab_titles.iter().enumerate() {
+                    let tab_title_len = tab_title.len.min(tab_width_max);
+                    let active = tab_idx == active_tab_no;
+                    let hover = !active && is_tab_hover(mouse_x, x, tab_title_len);
 
-            let cell_attrs = if active {
-                &active_cell_attrs
-            } else if hover {
-                &inactive_hover_attrs
-            } else {
-                &inactive_cell_attrs
-            };
+                    // Recompute the title so that it factors in both the hover
+                    // state and the adjusted maximum tab width based on
+                    // available space.
+                    let tab = &tab_info[tab_idx];
+                    let tab_title = match lookup_cached_tab_title(tab, config, hover, tab_title_len)
+                    {
+                        Ok(cached) => cached,
+                        Err(cache_key) => match lua.as_deref() {
+                            Some(lua) => {
+                                let (tabs, panes) = lua_tables.get_or_insert_with(|| {
+                                    build_lua_sequences(lua, tab_info, pane_info)
+                                        .expect("create_sequence_from")
+                                });
+                                compute_tab_title_uncached(
+                                    lua,
+                                    tabs,
+                                    panes,
+                                    tab,
+                                    config,
+                                    hover,
+                                    tab_title_len,
+                                    cache_key,
+                                )
+                            }
+                            None => compute_tab_title_no_lua(tab, config, cache_key),
+                        },
+                    };
 
-            let tab_start_idx = x;
+                    let cell_attrs = if active {
+                        &active_cell_attrs
+                    } else if hover {
+                        &inactive_hover_attrs
+                    } else {
+                        &inactive_cell_attrs
+                    };
 
-            has_indeterminate_progress |= tab_title.has_indeterminate;
+                    let tab_start_idx = x;
 
-            let esc = format_as_escapes(tab_title.items.clone()).expect("already parsed ok above");
-            let mut tab_line = parse_status_text(
-                &esc,
-                if config.use_fancy_tab_bar {
-                    CellAttributes::default()
-                } else {
-                    cell_attrs.clone()
-                },
-            );
+                    has_indeterminate_progress |= tab_title.has_indeterminate;
 
-            let title = tab_line.clone();
-            if tab_line.len() > tab_width_max {
-                tab_line.resize(tab_width_max, SEQ_ZERO);
-            }
+                    let esc = format_as_escapes(tab_title.items.clone())
+                        .expect("already parsed ok above");
+                    let mut tab_line = parse_status_text(
+                        &esc,
+                        if config.use_fancy_tab_bar {
+                            CellAttributes::default()
+                        } else {
+                            cell_attrs.clone()
+                        },
+                    );
 
-            let width = tab_line.len();
+                    let title = tab_line.clone();
+                    if tab_line.len() > tab_width_max {
+                        tab_line.resize(tab_width_max, SEQ_ZERO);
+                    }
 
-            items.push(TabEntry {
-                item: TabBarItem::Tab { tab_idx, active },
-                title,
-                x: tab_start_idx,
-                width,
+                    let width = tab_line.len();
+
+                    items.push(TabEntry {
+                        item: TabBarItem::Tab { tab_idx, active },
+                        title,
+                        x: tab_start_idx,
+                        width,
+                    });
+
+                    line.append_line(tab_line, SEQ_ZERO);
+                    x += width;
+                }
+
+                Ok::<(), anyhow::Error>(())
             });
-
-            line.append_line(tab_line, SEQ_ZERO);
-            x += width;
         }
 
         // New tab button
