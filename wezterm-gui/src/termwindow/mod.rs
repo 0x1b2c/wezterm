@@ -1206,8 +1206,11 @@ impl TermWindow {
                 } => {
                     self.emit_user_var_event(pane_id, name, value);
                 }
-                MuxNotification::WindowTitleChanged { .. }
-                | MuxNotification::Alert {
+                MuxNotification::WindowTitleChanged { .. } => {
+                    self.update_title();
+                }
+                MuxNotification::Alert {
+                    pane_id,
                     alert:
                         Alert::OutputSinceFocusLost
                         | Alert::CurrentWorkingDirectoryChanged
@@ -1215,9 +1218,10 @@ impl TermWindow {
                         | Alert::TabTitleChanged(_)
                         | Alert::IconTitleChanged(_)
                         | Alert::Progress(_),
-                    ..
                 } => {
-                    self.update_title();
+                    if self.window_contains_pane(pane_id) {
+                        self.update_title();
+                    }
                 }
                 MuxNotification::Alert {
                     alert: Alert::PaletteChanged,
