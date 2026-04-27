@@ -2,7 +2,12 @@ use crate::termwindow::{PaneInformation, TabInformation, UIItem, UIItemType};
 use config::{ConfigHandle, TabBarColors};
 use finl_unicode::grapheme_clusters::Graphemes;
 use mlua::FromLua;
-use std::sync::LazyLock;
+use mux::pane::CachePolicy;
+use mux::tab::TabId;
+use mux::Mux;
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 use termwiz::cell::{unicode_column_width, Cell, CellAttributes};
 use termwiz::color::{AnsiColor, ColorSpec};
@@ -49,6 +54,98 @@ struct TitleText {
     /// True when the built-in title path rendered an indeterminate spinner
     /// frame. A custom format-tab-title callback always leaves this false.
     has_indeterminate: bool,
+}
+
+/// Inputs that can change the rendered tab title. Used as a cache key to skip
+/// the expensive Lua marshalling in `call_format_tab_title` when nothing
+/// relevant has changed (a TUI spinner emitting OSC 0/2 at 30 Hz would
+/// otherwise re-marshal every tab and pane on each frame).
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct TabTitleCacheKey {
+    tab_index: usize,
+    is_active: bool,
+    tab_title: String,
+    active_pane: Option<ActivePaneCacheKey>,
+    hover: bool,
+    tab_max_width: usize,
+    use_fancy_tab_bar: bool,
+    show_tab_index_in_tab_bar: bool,
+    tab_and_split_indices_are_zero_based: bool,
+    generation: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ActivePaneCacheKey {
+    pane_id: mux::pane::PaneId,
+    title: String,
+    is_zoomed: bool,
+    progress: Progress,
+    current_working_dir: Option<String>,
+}
+
+struct TabTitleCacheEntry {
+    key: TabTitleCacheKey,
+    value: TitleText,
+}
+
+static TAB_TITLE_CACHE: LazyLock<Mutex<HashMap<TabId, TabTitleCacheEntry>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+static TAB_TITLE_CACHE_GENERATION: AtomicU64 = AtomicU64::new(0);
+
+/// Bump the cache generation so that all entries are treated as stale on the
+/// next lookup. Called when the user's Lua config is reloaded, since the
+/// `format-tab-title` callback body may have changed.
+pub fn bump_tab_title_cache_generation() {
+    TAB_TITLE_CACHE_GENERATION.fetch_add(1, Ordering::Relaxed);
+}
+
+fn current_working_dir_for_pane(pane_id: mux::pane::PaneId) -> Option<String> {
+    let mux = Mux::try_get()?;
+    let pane = mux.get_pane(pane_id)?;
+    pane.get_current_working_dir(CachePolicy::AllowStale)
+        .map(|url| url.as_str().to_string())
+}
+
+fn build_tab_title_cache_key(
+    tab: &TabInformation,
+    config: &ConfigHandle,
+    hover: bool,
+    tab_max_width: usize,
+) -> TabTitleCacheKey {
+    let active_pane = tab.active_pane.as_ref().map(|pane| ActivePaneCacheKey {
+        pane_id: pane.pane_id,
+        title: pane.title.clone(),
+        is_zoomed: pane.is_zoomed,
+        progress: pane.progress.clone(),
+        current_working_dir: current_working_dir_for_pane(pane.pane_id),
+    });
+
+    TabTitleCacheKey {
+        tab_index: tab.tab_index,
+        is_active: tab.is_active,
+        tab_title: tab.tab_title.clone(),
+        active_pane,
+        hover,
+        tab_max_width,
+        use_fancy_tab_bar: config.use_fancy_tab_bar,
+        show_tab_index_in_tab_bar: config.show_tab_index_in_tab_bar,
+        tab_and_split_indices_are_zero_based: config.tab_and_split_indices_are_zero_based,
+        generation: TAB_TITLE_CACHE_GENERATION.load(Ordering::Relaxed),
+    }
+}
+
+/// Drop cache entries for tabs that no longer exist in the mux. We cannot use
+/// the per-window `tab_info` slice here, because the cache is shared across
+/// all windows; using a single window's tabs as the liveness set would evict
+/// entries belonging to other windows on every frame.
+fn retain_cached_tab_titles() {
+    let Some(mux) = Mux::try_get() else {
+        return;
+    };
+    if let Ok(mut cache) = TAB_TITLE_CACHE.lock() {
+        cache.retain(|tab_id, _| mux.get_tab(*tab_id).is_some());
+    }
 }
 
 fn call_format_tab_title(
@@ -208,9 +305,20 @@ fn compute_tab_title(
     hover: bool,
     tab_max_width: usize,
 ) -> TitleText {
+    let cache_key = build_tab_title_cache_key(tab, config, hover, tab_max_width);
+    if let Ok(cache) = TAB_TITLE_CACHE.lock() {
+        if let Some(entry) = cache.get(&tab.tab_id) {
+            // An indeterminate spinner advances with time alone, so a title
+            // that contains one is stale even when the key still matches.
+            if entry.key == cache_key && !entry.value.has_indeterminate {
+                return entry.value.clone();
+            }
+        }
+    }
+
     let title = call_format_tab_title(tab, tab_info, pane_info, config, hover, tab_max_width);
 
-    match title {
+    let title_text = match title {
         Some(title) => title,
         None => {
             let mut items = vec![];
@@ -294,7 +402,19 @@ fn compute_tab_title(
                 has_indeterminate,
             }
         }
+    };
+
+    if let Ok(mut cache) = TAB_TITLE_CACHE.lock() {
+        cache.insert(
+            tab.tab_id,
+            TabTitleCacheEntry {
+                key: cache_key,
+                value: title_text.clone(),
+            },
+        );
     }
+
+    title_text
 }
 
 fn is_tab_hover(mouse_x: Option<usize>, x: usize, tab_title_len: usize) -> bool {
@@ -695,6 +815,8 @@ impl TabBarState {
             x = title_width;
             Self::integrated_title_buttons(mouse_x, &mut x, config, &mut items, &mut line, &colors);
         }
+
+        retain_cached_tab_titles();
 
         Self {
             line,

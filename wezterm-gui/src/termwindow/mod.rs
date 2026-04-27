@@ -1729,6 +1729,7 @@ impl TermWindow {
             "config was reloaded, overrides: {:?}",
             self.config_overrides
         );
+        crate::tabbar::bump_tab_title_cache_generation();
         self.key_table_state.clear_stack();
         self.connection_name = Connection::get().unwrap().name();
         let config = match config::overridden_config(&self.config_overrides) {
