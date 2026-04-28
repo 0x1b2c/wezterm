@@ -98,3 +98,10 @@ objc.workspace = true
 objc2-core-graphics.workspace = true
 plist.workspace = true
 shlex.workspace = true
+
+# The unmaintained `objc` crate's `msg_send!` / `class!` macros expand to
+# `#[cfg(feature = "cargo-clippy")]`, which trips the `unexpected_cfgs`
+# lint added in rustc 1.80. Whitelist this single value rather than
+# blanket-allow the lint or fork the upstream macros.
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("cargo-clippy"))'] }
