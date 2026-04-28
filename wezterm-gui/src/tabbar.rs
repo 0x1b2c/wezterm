@@ -81,6 +81,9 @@ struct ActivePaneCacheKey {
     is_zoomed: bool,
     progress: Progress,
     current_working_dir: Option<String>,
+    /// Distinguish OSC-set titles from user-managed ones so a cached entry
+    /// from one regime is never served after the other takes over.
+    title_set_via_osc: bool,
 }
 
 /// One cache slot per tab is not enough: `TabBarState::new` calls
@@ -120,6 +123,7 @@ fn build_tab_title_cache_key(
         is_zoomed: pane.is_zoomed,
         progress: pane.progress.clone(),
         current_working_dir: current_working_dir_for_pane(pane.pane_id),
+        title_set_via_osc: pane.title_set_via_osc,
     });
 
     TabTitleCacheKey {
@@ -313,16 +317,24 @@ fn spinner_phase(tab_id: usize) -> u64 {
     z ^ (z >> 31)
 }
 
-/// Look up a cached title for `tab`. Returns the cached value on hit, or the
-/// freshly built cache key on miss so the caller can reuse it when storing
-/// the recomputed value. Scans the per-tab variant list for an entry whose
-/// key matches the inputs exactly.
+/// Resolve a tab title before falling back to Lua: if the active pane title
+/// was set via OSC 0/2, return the bypass rendering directly; otherwise look
+/// up the cached value, returning the freshly built cache key on miss so the
+/// caller can reuse it when storing the recomputed value. Scans the per-tab
+/// variant list for an entry whose key matches the inputs exactly.
 fn lookup_cached_tab_title(
     tab: &TabInformation,
     config: &ConfigHandle,
     hover: bool,
     tab_max_width: usize,
 ) -> Result<TitleText, TabTitleCacheKey> {
+    if should_bypass_format_tab_title(tab) {
+        // Bypass results are cheap to produce and bypass the Lua callback,
+        // so we deliberately do not insert them into the cache.
+        if let Some(pane) = tab.active_pane.as_ref() {
+            return Ok(bypass_tab_title(pane));
+        }
+    }
     let cache_key = build_tab_title_cache_key(tab, config, hover, tab_max_width);
     if let Ok(cache) = TAB_TITLE_CACHE.lock() {
         if let Some(entries) = cache.get(&tab.tab_id) {
@@ -354,6 +366,35 @@ fn store_cached_tab_title(tab_id: TabId, key: TabTitleCacheKey, value: &TitleTex
             entries.push((key, value.clone()));
         }
     }
+}
+
+/// Render a tab title directly from the OSC-supplied pane title, skipping
+/// `format-tab-title` entirely. Used when the application has set the title
+/// via OSC 0/2: such updates can arrive at 30 Hz (e.g. spinner frames), and
+/// running the user's Lua callback for every frame is too costly. The trade
+/// off is that decorations like the index prefix and zoom marker are dropped
+/// for these tabs.
+fn bypass_tab_title(pane: &PaneInformation) -> TitleText {
+    let title = pane.title.clone();
+    let len = unicode_column_width(&title, None);
+    TitleText {
+        items: vec![FormatItem::Text(title)],
+        len,
+        has_indeterminate: false,
+    }
+}
+
+/// True if `compute_tab_title` should bypass `format-tab-title` for this tab
+/// and render the OSC pane title verbatim. We keep `tab:set_title()` overrides
+/// on the Lua path so user decorations still apply when explicitly requested.
+fn should_bypass_format_tab_title(tab: &TabInformation) -> bool {
+    if !tab.tab_title.is_empty() {
+        return false;
+    }
+    tab.active_pane
+        .as_ref()
+        .map(|pane| pane.title_set_via_osc)
+        .unwrap_or(false)
 }
 
 /// Built-in fallback used when there is no `format-tab-title` callback or it

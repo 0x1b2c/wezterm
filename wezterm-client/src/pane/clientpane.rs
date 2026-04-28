@@ -20,6 +20,7 @@ use ratelim::RateLimiter;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::ops::Range;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use termwiz::input::KeyEvent;
 use termwiz::surface::SequenceNo;
@@ -49,6 +50,9 @@ pub struct ClientPane {
     config: Mutex<Option<Arc<dyn TerminalConfiguration>>>,
     unseen_output: Mutex<bool>,
     progress: Mutex<Progress>,
+    /// Mirrors the server-side `TerminalState::title_set_via_osc` flag.
+    /// Updated whenever the server forwards an `Alert::WindowTitleChanged`.
+    title_set_via_osc: AtomicBool,
 }
 
 impl ClientPane {
@@ -131,6 +135,7 @@ impl ClientPane {
             user_vars: Mutex::new(HashMap::new()),
             config: Mutex::new(None),
             progress: Mutex::new(Progress::default()),
+            title_set_via_osc: AtomicBool::new(false),
         }
     }
 
@@ -198,6 +203,10 @@ impl ClientPane {
                             pane_id: self.local_pane_id,
                             alert: Alert::Progress(progress.clone()),
                         });
+                    }
+                    Alert::WindowTitleChanged { set_via_osc, .. } => {
+                        self.title_set_via_osc
+                            .store(*set_via_osc, Ordering::Relaxed);
                     }
                     _ => {}
                 }
@@ -323,6 +332,10 @@ impl Pane for ClientPane {
         let renderable = self.renderable.lock();
         let inner = renderable.inner.borrow();
         inner.title.clone()
+    }
+
+    fn title_set_via_osc(&self) -> bool {
+        self.title_set_via_osc.load(Ordering::Relaxed)
     }
 
     fn get_progress(&self) -> Progress {
