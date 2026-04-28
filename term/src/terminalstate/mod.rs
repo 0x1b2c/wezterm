@@ -7,11 +7,12 @@ use crate::color::{ColorPalette, RgbColor};
 use crate::config::{BidiMode, NewlineCanon};
 use log::debug;
 use num_traits::ToPrimitive;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::io::{BufWriter, Write};
 use std::num::NonZeroUsize;
 use std::sync::mpsc::{channel, Sender};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use terminfo::{Database, Value};
 use termwiz::input::KeyboardEncoding;
 use url::Url;
@@ -42,6 +43,21 @@ lazy_static::lazy_static! {
         Database::from_buffer(&data[..]).unwrap()
     };
 }
+
+/// Number of OSC title updates within `OSC_TITLE_BURST_WINDOW` required before
+/// the bypass kicks in. Picked so a typical interactive shell prompt (single
+/// OSC per redraw) never crosses the threshold, while a progress spinner
+/// emitting at ~15Hz (~67ms between frames) reaches it within ~3 frames.
+pub(crate) const OSC_TITLE_BURST_COUNT: usize = 3;
+
+/// Sliding window over which OSC title updates are counted to detect a burst.
+pub(crate) const OSC_TITLE_BURST_WINDOW: Duration = Duration::from_millis(200);
+
+/// Once a burst has been declared, it stays active until this much time has
+/// elapsed since the last OSC title update. Wider than the entry window so a
+/// spinner whose emit cadence dips briefly does not flicker between bypass and
+/// formatted modes.
+pub(crate) const OSC_TITLE_BURST_IDLE_TIMEOUT: Duration = Duration::from_millis(1000);
 
 /// Tracks the horizontal tab stops for a terminal screen.
 /// Tab stops are stored as a boolean vector, one entry per column.
@@ -349,11 +365,19 @@ pub struct TerminalState {
     title: String,
     /// The icon title string (OSC 1)
     icon_title: Option<String>,
-    /// True once the application has set the window title via OSC 2 (or the
-    /// combined OSC 0 form). Sticky for the lifetime of the terminal so that
-    /// the GUI tab bar can bypass `format-tab-title` and render the OSC text
-    /// verbatim, avoiding a Lua callback per high-frequency title update.
-    title_set_via_osc: bool,
+    /// Timestamps of recent OSC 0/2 title updates, used to detect entry into a
+    /// sustained burst of high-frequency updates (e.g. a progress spinner). The
+    /// GUI tab bar consults `osc_title_burst_active()` to bypass the
+    /// `format-tab-title` Lua callback while a burst is in progress.
+    osc_title_burst_history: VecDeque<Instant>,
+    /// True once a burst has been declared; stays true until the pane has been
+    /// idle (no new OSC title updates) for `OSC_TITLE_BURST_IDLE_TIMEOUT`.
+    /// Hysteresis here prevents the bypass from flickering off when a spinner's
+    /// emit cadence briefly dips below the entry threshold.
+    osc_title_burst_active: bool,
+    /// Timestamp of the most recent OSC 0/2 title update, used to drive the
+    /// idle-timeout exit from a burst. `None` until the first OSC arrives.
+    osc_title_last_update: Option<Instant>,
     progress: Progress,
 
     palette: Option<ColorPalette>,
@@ -573,7 +597,9 @@ impl TerminalState {
             tabs: TabStop::new(size.cols, 8),
             title: "wezterm".to_string(),
             icon_title: None,
-            title_set_via_osc: false,
+            osc_title_burst_history: VecDeque::with_capacity(OSC_TITLE_BURST_COUNT),
+            osc_title_burst_active: false,
+            osc_title_last_update: None,
             palette: None,
             pixel_height: size.pixel_height,
             pixel_width: size.pixel_width,
@@ -662,12 +688,53 @@ impl TerminalState {
         self.icon_title.as_ref().unwrap_or(&self.title)
     }
 
-    /// Returns true once the application has set the window title via an
-    /// OSC 0/2 sequence. The flag is sticky (never cleared) so that the GUI
-    /// can keep rendering the OSC-supplied title verbatim instead of paying
-    /// for a Lua `format-tab-title` callback on every update.
-    pub fn title_set_via_osc(&self) -> bool {
-        self.title_set_via_osc
+    /// Returns true when the application is in a sustained burst of OSC 0/2
+    /// title updates. Entry: `OSC_TITLE_BURST_COUNT` updates within the last
+    /// `OSC_TITLE_BURST_WINDOW`. Exit: no further updates for
+    /// `OSC_TITLE_BURST_IDLE_TIMEOUT`. While active, the GUI tab bar bypasses
+    /// the `format-tab-title` Lua callback and renders the OSC-supplied title
+    /// verbatim. Hysteresis between entry and exit prevents flickering when a
+    /// spinner's emit cadence dips briefly below the entry threshold.
+    pub fn osc_title_burst_active(&mut self) -> bool {
+        if self.osc_title_burst_active {
+            if let Some(last) = self.osc_title_last_update {
+                if last.elapsed() > OSC_TITLE_BURST_IDLE_TIMEOUT {
+                    self.osc_title_burst_active = false;
+                }
+            }
+        }
+        self.osc_title_burst_active
+    }
+
+    /// Records that the application has just issued an OSC 0/2 title update.
+    /// Used by the OSC performer to keep the burst-detection window populated
+    /// and to refresh the idle-timeout anchor.
+    pub(crate) fn record_osc_title_update(&mut self) {
+        let now = Instant::now();
+        self.prune_osc_title_burst_history(now);
+        self.osc_title_burst_history.push_back(now);
+        // Cap the buffer at the burst threshold; older entries cannot lower
+        // the answer below the cutoff and are not worth retaining.
+        while self.osc_title_burst_history.len() > OSC_TITLE_BURST_COUNT {
+            self.osc_title_burst_history.pop_front();
+        }
+        self.osc_title_last_update = Some(now);
+        if !self.osc_title_burst_active
+            && self.osc_title_burst_history.len() >= OSC_TITLE_BURST_COUNT
+        {
+            self.osc_title_burst_active = true;
+        }
+    }
+
+    fn prune_osc_title_burst_history(&mut self, now: Instant) {
+        let cutoff = now - OSC_TITLE_BURST_WINDOW;
+        while let Some(front) = self.osc_title_burst_history.front() {
+            if *front < cutoff {
+                self.osc_title_burst_history.pop_front();
+            } else {
+                break;
+            }
+        }
     }
 
     pub fn get_progress(&self) -> Progress {
