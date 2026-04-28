@@ -271,6 +271,10 @@ pub struct PaneInformation {
     pub pixel_width: usize,
     pub pixel_height: usize,
     pub title: String,
+    /// True if the pane title was set by the application via OSC 0/2. The
+    /// tab bar uses this to skip `format-tab-title` for high-frequency
+    /// title updates (e.g. spinner frames).
+    pub title_set_via_osc: bool,
     pub user_vars: HashMap<String, String>,
     pub progress: Progress,
 }
@@ -1214,7 +1218,7 @@ impl TermWindow {
                     alert:
                         Alert::OutputSinceFocusLost
                         | Alert::CurrentWorkingDirectoryChanged
-                        | Alert::WindowTitleChanged(_)
+                        | Alert::WindowTitleChanged { .. }
                         | Alert::TabTitleChanged(_)
                         | Alert::IconTitleChanged(_)
                         | Alert::Progress(_),
@@ -1466,7 +1470,7 @@ impl TermWindow {
                 alert:
                     Alert::OutputSinceFocusLost
                     | Alert::CurrentWorkingDirectoryChanged
-                    | Alert::WindowTitleChanged(_)
+                    | Alert::WindowTitleChanged { .. }
                     | Alert::TabTitleChanged(_)
                     | Alert::IconTitleChanged(_)
                     | Alert::Progress(_)
@@ -3455,6 +3459,7 @@ impl TermWindow {
             pixel_width: pos.pixel_width,
             pixel_height: pos.pixel_height,
             title: pos.pane.get_title(),
+            title_set_via_osc: pos.pane.title_set_via_osc(),
             user_vars: pos.pane.copy_user_vars(),
             progress: pos.pane.get_progress(),
         }

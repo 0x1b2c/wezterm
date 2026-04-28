@@ -144,7 +144,7 @@ impl GuiFrontEnd {
                         Alert::OutputSinceFocusLost
                         | Alert::PaletteChanged
                         | Alert::CurrentWorkingDirectoryChanged
-                        | Alert::WindowTitleChanged(_)
+                        | Alert::WindowTitleChanged { .. }
                         | Alert::TabTitleChanged(_)
                         | Alert::IconTitleChanged(_)
                         | Alert::SetUserVar { .. },

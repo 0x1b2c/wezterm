@@ -462,6 +462,10 @@ impl Pane for LocalPane {
         title
     }
 
+    fn title_set_via_osc(&self) -> bool {
+        self.terminal.lock().title_set_via_osc()
+    }
+
     fn get_progress(&self) -> Progress {
         self.terminal.lock().get_progress()
     }
@@ -946,7 +950,7 @@ impl AlertHandler for LocalPaneNotifHandler {
         promise::spawn::spawn_into_main_thread(async move {
             let mux = Mux::get();
             match &alert {
-                Alert::WindowTitleChanged(title) => {
+                Alert::WindowTitleChanged { title, .. } => {
                     if let Some((_domain, window_id, _tab_id)) = mux.resolve_pane_id(pane_id) {
                         if let Some(mut window) = mux.get_window_mut(window_id) {
                             window.set_title(title);
