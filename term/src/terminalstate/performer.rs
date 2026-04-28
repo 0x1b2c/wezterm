@@ -757,7 +757,7 @@ impl<'a> Performer<'a> {
             OperatingSystemCommand::SetIconNameAndWindowTitle(title) => {
                 self.icon_title.take();
                 self.title = title.clone();
-                self.title_set_via_osc = true;
+                self.record_osc_title_update();
                 if let Some(handler) = self.alert_handler.as_mut() {
                     handler.alert(Alert::WindowTitleChanged {
                         title: title.clone(),
@@ -770,7 +770,7 @@ impl<'a> Performer<'a> {
             OperatingSystemCommand::SetWindowTitleSun(title)
             | OperatingSystemCommand::SetWindowTitle(title) => {
                 self.title = title.clone();
-                self.title_set_via_osc = true;
+                self.record_osc_title_update();
                 if let Some(handler) = self.alert_handler.as_mut() {
                     handler.alert(Alert::WindowTitleChanged {
                         title,

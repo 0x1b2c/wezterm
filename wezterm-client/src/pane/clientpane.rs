@@ -18,10 +18,10 @@ use parking_lot::{MappedMutexGuard, Mutex, MutexGuard};
 use rangeset::RangeSet;
 use ratelim::RateLimiter;
 use std::cell::RefCell;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::ops::Range;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use termwiz::input::KeyEvent;
 use termwiz::surface::SequenceNo;
 use url::Url;
@@ -31,6 +31,19 @@ use wezterm_term::{
     Alert, Clipboard, KeyCode, KeyModifiers, Line, MouseEvent, Progress, StableRowIndex,
     TerminalConfiguration, TerminalSize,
 };
+
+/// Number of OSC title updates within `OSC_TITLE_BURST_WINDOW` required before
+/// the bypass kicks in. Mirrors `wezterm_term::OSC_TITLE_BURST_COUNT`.
+const OSC_TITLE_BURST_COUNT: usize = 3;
+
+/// Sliding window over which OSC title updates are counted to detect a burst.
+/// Mirrors `wezterm_term::OSC_TITLE_BURST_WINDOW`.
+const OSC_TITLE_BURST_WINDOW: Duration = Duration::from_millis(200);
+
+/// Once a burst has been declared, it stays active until this much time has
+/// elapsed since the last OSC title update. Mirrors
+/// `wezterm_term::OSC_TITLE_BURST_IDLE_TIMEOUT`.
+const OSC_TITLE_BURST_IDLE_TIMEOUT: Duration = Duration::from_millis(1000);
 
 pub struct ClientPane {
     client: Arc<ClientInner>,
@@ -50,9 +63,20 @@ pub struct ClientPane {
     config: Mutex<Option<Arc<dyn TerminalConfiguration>>>,
     unseen_output: Mutex<bool>,
     progress: Mutex<Progress>,
-    /// Mirrors the server-side `TerminalState::title_set_via_osc` flag.
-    /// Updated whenever the server forwards an `Alert::WindowTitleChanged`.
-    title_set_via_osc: AtomicBool,
+    /// Sliding window of recent OSC title alert timestamps forwarded by the
+    /// server. Mirrors `TerminalState::osc_title_burst_history` and feeds the
+    /// burst-entry detection that lets the GUI tab bar bypass
+    /// `format-tab-title` while a remote pane is being hammered with title
+    /// updates (e.g. a progress spinner).
+    osc_title_burst_history: Mutex<VecDeque<Instant>>,
+    /// Latched burst state, set when the entry threshold is crossed and
+    /// cleared after `OSC_TITLE_BURST_IDLE_TIMEOUT` of silence. Mirrors
+    /// `TerminalState::osc_title_burst_active`.
+    osc_title_burst_active: Mutex<bool>,
+    /// Timestamp of the most recent OSC title alert, used to drive the
+    /// idle-timeout exit from a burst. Mirrors
+    /// `TerminalState::osc_title_last_update`.
+    osc_title_last_update: Mutex<Option<Instant>>,
 }
 
 impl ClientPane {
@@ -135,7 +159,9 @@ impl ClientPane {
             user_vars: Mutex::new(HashMap::new()),
             config: Mutex::new(None),
             progress: Mutex::new(Progress::default()),
-            title_set_via_osc: AtomicBool::new(false),
+            osc_title_burst_history: Mutex::new(VecDeque::with_capacity(OSC_TITLE_BURST_COUNT)),
+            osc_title_burst_active: Mutex::new(false),
+            osc_title_last_update: Mutex::new(None),
         }
     }
 
@@ -205,8 +231,9 @@ impl ClientPane {
                         });
                     }
                     Alert::WindowTitleChanged { set_via_osc, .. } => {
-                        self.title_set_via_osc
-                            .store(*set_via_osc, Ordering::Relaxed);
+                        if *set_via_osc {
+                            self.record_osc_title_update();
+                        }
                     }
                     _ => {}
                 }
@@ -247,6 +274,57 @@ impl ClientPane {
 
     pub fn remote_pane_id(&self) -> TabId {
         self.remote_pane_id
+    }
+
+    /// Records a server-side OSC 0/2 title update: refreshes the entry-window
+    /// history, latches the burst flag once the entry threshold is crossed,
+    /// and updates the idle-timeout anchor.
+    fn record_osc_title_update(&self) {
+        let now = Instant::now();
+        let mut history = self.osc_title_burst_history.lock();
+        Self::prune_burst_history(&mut history, now);
+        history.push_back(now);
+        while history.len() > OSC_TITLE_BURST_COUNT {
+            history.pop_front();
+        }
+        let crossed_threshold = history.len() >= OSC_TITLE_BURST_COUNT;
+        drop(history);
+        *self.osc_title_last_update.lock() = Some(now);
+        if crossed_threshold {
+            let mut active = self.osc_title_burst_active.lock();
+            if !*active {
+                *active = true;
+            }
+        }
+    }
+
+    /// Returns true while the pane is in a sustained burst of OSC 0/2 title
+    /// updates. Entry: `OSC_TITLE_BURST_COUNT` updates within the last
+    /// `OSC_TITLE_BURST_WINDOW`. Exit: no further updates for
+    /// `OSC_TITLE_BURST_IDLE_TIMEOUT`. Hysteresis between entry and exit
+    /// prevents the bypass from flickering when a spinner's emit cadence dips
+    /// briefly below the entry threshold.
+    fn osc_title_burst_active(&self) -> bool {
+        let mut active = self.osc_title_burst_active.lock();
+        if *active {
+            if let Some(last) = *self.osc_title_last_update.lock() {
+                if last.elapsed() > OSC_TITLE_BURST_IDLE_TIMEOUT {
+                    *active = false;
+                }
+            }
+        }
+        *active
+    }
+
+    fn prune_burst_history(history: &mut VecDeque<Instant>, now: Instant) {
+        let cutoff = now - OSC_TITLE_BURST_WINDOW;
+        while let Some(front) = history.front() {
+            if *front < cutoff {
+                history.pop_front();
+            } else {
+                break;
+            }
+        }
     }
 
     /// Arrange to suppress the next Pane::kill call.
@@ -335,7 +413,7 @@ impl Pane for ClientPane {
     }
 
     fn title_set_via_osc(&self) -> bool {
-        self.title_set_via_osc.load(Ordering::Relaxed)
+        self.osc_title_burst_active()
     }
 
     fn get_progress(&self) -> Progress {
