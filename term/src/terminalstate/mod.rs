@@ -349,6 +349,11 @@ pub struct TerminalState {
     title: String,
     /// The icon title string (OSC 1)
     icon_title: Option<String>,
+    /// True once the application has set the window title via OSC 2 (or the
+    /// combined OSC 0 form). Sticky for the lifetime of the terminal so that
+    /// the GUI tab bar can bypass `format-tab-title` and render the OSC text
+    /// verbatim, avoiding a Lua callback per high-frequency title update.
+    title_set_via_osc: bool,
     progress: Progress,
 
     palette: Option<ColorPalette>,
@@ -568,6 +573,7 @@ impl TerminalState {
             tabs: TabStop::new(size.cols, 8),
             title: "wezterm".to_string(),
             icon_title: None,
+            title_set_via_osc: false,
             palette: None,
             pixel_height: size.pixel_height,
             pixel_width: size.pixel_width,
@@ -654,6 +660,14 @@ impl TerminalState {
     /// if it is set, otherwise return the OSC 2 window title.
     pub fn get_title(&self) -> &str {
         self.icon_title.as_ref().unwrap_or(&self.title)
+    }
+
+    /// Returns true once the application has set the window title via an
+    /// OSC 0/2 sequence. The flag is sticky (never cleared) so that the GUI
+    /// can keep rendering the OSC-supplied title verbatim instead of paying
+    /// for a Lua `format-tab-title` callback on every update.
+    pub fn title_set_via_osc(&self) -> bool {
+        self.title_set_via_osc
     }
 
     pub fn get_progress(&self) -> Progress {

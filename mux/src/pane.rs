@@ -237,6 +237,12 @@ pub trait Pane: Downcast + Send + Sync {
     fn get_dimensions(&self) -> RenderableDimensions;
 
     fn get_title(&self) -> String;
+    /// True if the pane title was set by the application via an OSC 0/2
+    /// sequence. The GUI uses this to bypass the user's `format-tab-title`
+    /// callback for spinner-style titles updated at high frequency.
+    fn title_set_via_osc(&self) -> bool {
+        false
+    }
     fn get_progress(&self) -> Progress {
         Progress::None
     }

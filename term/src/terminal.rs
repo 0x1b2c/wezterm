@@ -57,7 +57,14 @@ pub enum Alert {
     },
     CurrentWorkingDirectoryChanged,
     IconTitleChanged(Option<String>),
-    WindowTitleChanged(String),
+    WindowTitleChanged {
+        title: String,
+        /// True when the title was set by the application via OSC 0/2.
+        /// Carried so that the GUI can bypass `format-tab-title` for
+        /// spinner-style titles that update at high frequency.
+        #[cfg_attr(feature = "use_serde", serde(default))]
+        set_via_osc: bool,
+    },
     TabTitleChanged(Option<String>),
     /// When the color palette has been updated
     PaletteChanged,
