@@ -463,7 +463,7 @@ impl Pane for LocalPane {
     }
 
     fn title_set_via_osc(&self) -> bool {
-        self.terminal.lock().title_set_via_osc()
+        self.terminal.lock().osc_title_burst_active()
     }
 
     fn get_progress(&self) -> Progress {
