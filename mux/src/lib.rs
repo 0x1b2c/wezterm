@@ -869,9 +869,24 @@ impl Mux {
                 }
             }
 
+            // Only detach a domain if no remaining window still references
+            // it. Otherwise removing one window would tear down panes that
+            // belong to unrelated windows sharing the same client/SSH domain.
+            // The window we are removing has already been pulled from
+            // self.windows above, so this read sees only siblings.
             for domain_id in domains_of_window {
                 if let Some(domain) = self.get_domain(domain_id) {
                     if domain.detachable() {
+                        let still_in_use = self.windows.read().values().any(|other| {
+                            other.iter_tabs().any(|tab| {
+                                tab.iter_panes_ignoring_zoom()
+                                    .iter()
+                                    .any(|p| p.pane.domain_id() == domain_id)
+                            })
+                        });
+                        if still_in_use {
+                            continue;
+                        }
                         log::info!("detaching domain");
                         if let Err(err) = domain.detach() {
                             log::error!(
