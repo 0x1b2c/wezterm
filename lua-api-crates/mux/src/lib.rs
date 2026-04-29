@@ -120,6 +120,15 @@ pub fn register(lua: &Lua) -> anyhow::Result<()> {
     )?;
 
     mux_mod.set(
+        "kill_window",
+        lua.create_function(|_, window: UserDataRef<MuxWindow>| {
+            let mux = get_mux()?;
+            mux.kill_window(window.0);
+            Ok(())
+        })?,
+    )?;
+
+    mux_mod.set(
         "get_domain",
         lua.create_function(|_, domain: LuaValue| {
             let mux = get_mux()?;
