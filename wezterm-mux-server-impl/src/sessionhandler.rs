@@ -989,6 +989,15 @@ impl SessionHandler {
             }
 
             Pdu::Invalid { .. } => send_response(Err(anyhow!("invalid PDU {:?}", decoded.pdu))),
+            Pdu::ListWindowPresets { .. }
+            | Pdu::MaterializeWindowPreset { .. }
+            | Pdu::KillWindowPreset { .. } => {
+                // Implemented in a follow-up commit; until then, surface a
+                // clear error rather than hanging the client.
+                send_response(Err(anyhow!(
+                    "window preset PDUs are not yet implemented on this server"
+                )))
+            }
             Pdu::Pong { .. }
             | Pdu::ListPanesResponse { .. }
             | Pdu::SetClipboard { .. }
@@ -1011,6 +1020,8 @@ impl SessionHandler {
             | Pdu::MovePaneToNewTabResponse { .. }
             | Pdu::TabAddedToWindow { .. }
             | Pdu::GetPaneRenderableDimensionsResponse { .. }
+            | Pdu::ListWindowPresetsResponse { .. }
+            | Pdu::MaterializeWindowPresetResponse { .. }
             | Pdu::ErrorResponse { .. } => {
                 send_response(Err(anyhow!("expected a request, got {:?}", decoded.pdu)))
             }

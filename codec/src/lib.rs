@@ -442,7 +442,7 @@ macro_rules! pdu {
 /// The overall version of the codec.
 /// This must be bumped when backwards incompatible changes
 /// are made to the types and protocol.
-pub const CODEC_VERSION: usize = 45;
+pub const CODEC_VERSION: usize = 46;
 
 // Defines the Pdu enum.
 // Each struct has an explicit identifying number.
@@ -503,6 +503,11 @@ pdu! {
     GetPaneDirection: 60,
     GetPaneDirectionResponse: 61,
     AdjustPaneSize: 62,
+    ListWindowPresets: 63,
+    ListWindowPresetsResponse: 64,
+    MaterializeWindowPreset: 65,
+    MaterializeWindowPresetResponse: 66,
+    KillWindowPreset: 67,
 }
 
 impl Pdu {
@@ -875,6 +880,38 @@ pub struct AdjustPaneSize {
     pub pane_id: PaneId,
     pub direction: PaneDirection,
     pub amount: usize,
+}
+
+#[derive(Deserialize, Serialize, PartialEq, Debug, Clone)]
+pub struct ListWindowPresets {}
+
+/// Status of a single window preset declared in `config.window_presets`.
+#[derive(Deserialize, Serialize, PartialEq, Debug, Clone)]
+pub struct WindowPresetStatus {
+    pub name: String,
+    pub is_running: bool,
+}
+
+#[derive(Deserialize, Serialize, PartialEq, Debug, Clone)]
+pub struct ListWindowPresetsResponse {
+    pub presets: Vec<WindowPresetStatus>,
+}
+
+#[derive(Deserialize, Serialize, PartialEq, Debug, Clone)]
+pub struct MaterializeWindowPreset {
+    pub name: String,
+}
+
+#[derive(Deserialize, Serialize, PartialEq, Debug, Clone)]
+pub struct MaterializeWindowPresetResponse {
+    /// The id of the newly materialized window. `None` indicates that the
+    /// preset was already running and no new window was created.
+    pub window_id: Option<WindowId>,
+}
+
+#[derive(Deserialize, Serialize, PartialEq, Debug, Clone)]
+pub struct KillWindowPreset {
+    pub name: String,
 }
 
 #[derive(Deserialize, Serialize, PartialEq, Debug)]
