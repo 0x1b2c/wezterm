@@ -7,10 +7,12 @@
 
 use anyhow::{anyhow, Context};
 use codec::WindowPresetStatus;
-use config::keyassignment::WindowPreset;
+use config::keyassignment::{SpawnCommand, WindowPreset};
+use mux::pane::Pane;
 use mux::window::WindowId;
 use mux::Mux;
 use portable_pty::CommandBuilder;
+use std::sync::Arc;
 
 /// Returns the status of every preset declared in the current configuration,
 /// in the order in which the names are iterated by the configuration map.
@@ -49,7 +51,7 @@ pub async fn materialize_window_preset(name: &str) -> anyhow::Result<Option<Wind
 
     // Spawn the first tab; this implicitly creates the window.
     let first = &preset.tabs[0];
-    let (_tab, _pane, window_id) = mux
+    let (_tab, pane, window_id) = mux
         .spawn_tab_or_window(
             None,
             first.domain.clone(),
@@ -67,25 +69,43 @@ pub async fn materialize_window_preset(name: &str) -> anyhow::Result<Option<Wind
         window.set_title(name);
     }
 
+    apply_send_text(first, &pane)
+        .with_context(|| format!("send_text for first tab of window preset `{name}`"))?;
+
     // Subsequent tabs land in the same window.
     for (idx, tab) in preset.tabs.iter().enumerate().skip(1) {
-        mux.spawn_tab_or_window(
-            Some(window_id),
-            tab.domain.clone(),
-            command_builder_for(tab)?,
-            cwd_for(tab),
-            size,
-            None,
-            mux.active_workspace(),
-            None,
-        )
-        .await
-        .with_context(|| {
-            format!("spawning tab #{idx} of window preset `{name}` into window {window_id}")
-        })?;
+        let (_tab, pane, _window_id) = mux
+            .spawn_tab_or_window(
+                Some(window_id),
+                tab.domain.clone(),
+                command_builder_for(tab)?,
+                cwd_for(tab),
+                size,
+                None,
+                mux.active_workspace(),
+                None,
+            )
+            .await
+            .with_context(|| {
+                format!("spawning tab #{idx} of window preset `{name}` into window {window_id}")
+            })?;
+
+        apply_send_text(tab, &pane)
+            .with_context(|| format!("send_text for tab #{idx} of window preset `{name}`"))?;
     }
 
     Ok(Some(window_id))
+}
+
+/// Honor the `send_text` field on a `SpawnCommand` by writing its bytes into
+/// the freshly spawned pane's stdin. No-op when the field is unset.
+fn apply_send_text(spawn: &SpawnCommand, pane: &Arc<dyn Pane>) -> anyhow::Result<()> {
+    let Some(text) = spawn.send_text.as_ref() else {
+        return Ok(());
+    };
+    pane.writer()
+        .write_all(text.as_bytes())
+        .map_err(anyhow::Error::from)
 }
 
 /// Tear down the running window backing the preset identified by `name`.

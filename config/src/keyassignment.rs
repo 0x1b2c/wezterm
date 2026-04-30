@@ -210,6 +210,16 @@ pub struct SpawnCommand {
     pub domain: SpawnTabDomain,
 
     pub position: Option<crate::GuiPosition>,
+
+    /// Optional bytes to write to the spawned pane's stdin immediately after
+    /// it is created. Useful for window_presets that want to auto-run a
+    /// command in the default shell rather than overriding the shell via
+    /// `args`. Currently only honored by `config.window_presets`
+    /// materialization; other SpawnCommand consumers (key assignments,
+    /// launch_menu, CLI spawn, etc.) ignore this field. Trailing newline is
+    /// not added automatically — include it explicitly if you want the shell
+    /// to execute the line.
+    pub send_text: Option<String>,
 }
 impl_lua_conversion_dynamic!(SpawnCommand);
 
@@ -274,6 +284,7 @@ impl SpawnCommand {
             set_environment_variables,
             cwd,
             position: None,
+            send_text: None,
         })
     }
 }
