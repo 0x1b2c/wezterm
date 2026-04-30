@@ -12,6 +12,7 @@ use crate::font::{
 use crate::frontend::FrontEndSelection;
 use crate::keyassignment::{
     KeyAssignment, KeyTable, KeyTableEntry, KeyTables, MouseEventTrigger, SpawnCommand,
+    WindowPreset,
 };
 use crate::keys::{Key, LeaderKey, Mouse};
 use crate::lua::make_lua_context;
@@ -736,6 +737,19 @@ pub struct Config {
 
     #[dynamic(default)]
     pub launch_menu: Vec<SpawnCommand>,
+
+    /// Named multi-tab window templates that can be materialized as a single
+    /// atomic unit. Each value describes the tabs that compose the window;
+    /// the map key is used both as the preset name and as the window title
+    /// applied when the preset is materialized.
+    #[dynamic(default)]
+    pub window_presets: HashMap<String, WindowPreset>,
+
+    /// References into `window_presets`. The named presets are materialized
+    /// automatically by the mux server after the `mux-startup` event has
+    /// been processed. Presets that are already running are skipped.
+    #[dynamic(default)]
+    pub startup_windows: Vec<String>,
 
     #[dynamic(default)]
     pub use_box_model_render: bool,

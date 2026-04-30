@@ -268,6 +268,22 @@ impl SpawnCommand {
     }
 }
 
+/// Declarative description of a multi-tab window that can be spawned as a unit.
+///
+/// Each preset is identified by the key under which it is registered in
+/// `config.window_presets`. Presets can be auto-spawned when the mux server
+/// starts (see `config.startup_windows`) or surfaced via the launcher with
+/// the `WINDOW_PRESETS` flag.
+#[derive(Default, Debug, Clone, PartialEq, FromDynamic, ToDynamic)]
+pub struct WindowPreset {
+    /// The tabs to spawn in the window. The first entry creates the window
+    /// itself; subsequent entries are added as additional tabs in order.
+    /// An empty list is rejected at materialization time.
+    #[dynamic(default)]
+    pub tabs: Vec<SpawnCommand>,
+}
+impl_lua_conversion_dynamic!(WindowPreset);
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, FromDynamic, ToDynamic)]
 pub enum PaneDirection {
     Up,
