@@ -2,6 +2,17 @@
 linker = "x86_64-w64-mingw32-gcc"
 ar = "x86_64-w64-mingw32-gcc-ar"
 
+# Filter the noisy "has no symbols" warnings emitted on macOS when
+# conditionally compiled C sources (libpng NEON, pixman timing, etc.) produce
+# empty object files for the non-active architecture. The cc crate runs
+# `ar s` to build the archive index; on Apple platforms that step delegates
+# to the ranlib code path, hence the "ranlib:" prefix. Wrapping `ar` is what
+# actually intercepts these messages. Scoped per-target so Linux cross-compile
+# builds (which use a different ar) are unaffected.
+[env]
+AR_aarch64-apple-darwin = { value = ".cargo/silent-ar.sh", relative = true }
+AR_x86_64-apple-darwin = { value = ".cargo/silent-ar.sh", relative = true }
+
 # We need openssl to be statically linked on windows to avoid madness,
 # and openssl-src does that based on the crt-static feature being
 # enabled for the target, so let's turn that on here.
