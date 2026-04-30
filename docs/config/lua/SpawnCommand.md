@@ -73,6 +73,16 @@ wezterm.action.SpawnCommandInNewWindow {
     -- * {Named="HDMI-1"} - uses a screen by name. See wezterm.gui.screens()
     -- origin = "ScreenCoordinateSystem"
   },
+
+  -- Optional bytes to write to the spawned pane's stdin immediately after
+  -- it is created. Useful for window_presets that want to auto-run a
+  -- command in the default shell rather than overriding the shell via
+  -- `args`. Currently only honored by `config.window_presets`
+  -- materialization; other SpawnCommand consumers (key assignments,
+  -- launch_menu, CLI spawn, etc.) ignore this field. The trailing newline
+  -- is not added automatically; include it explicitly to make the shell
+  -- execute the line.
+  send_text = 'tmux attach\n',
 }
 ```
 
