@@ -40,6 +40,8 @@ enum EntryAction {
     /// even when the preset is already running, in which case the call
     /// becomes a no-op rather than focusing the existing window.
     MaterializePreset { name: String, domain_id: DomainId },
+    /// Tear down the running window backing the named preset.
+    KillPreset { name: String, domain_id: DomainId },
 }
 
 #[derive(Clone)]
@@ -170,7 +172,9 @@ impl LauncherArgs {
             vec![]
         };
 
-        let window_presets = if flags.contains(LauncherFlags::WINDOW_PRESETS) {
+        let needs_window_presets =
+            flags.intersects(LauncherFlags::WINDOW_PRESETS | LauncherFlags::WINDOW_PRESETS_KILL);
+        let window_presets = if needs_window_presets {
             fetch_window_presets(domain_id_of_current_tab).await
         } else {
             vec![]
@@ -233,6 +237,26 @@ fn dispatch_materialize_window_preset(domain_id: DomainId, name: String) {
             wezterm_mux_server_impl::window_presets::materialize_window_preset(&name).await
         {
             log::error!("failed to materialize window preset `{name}`: {err:#}");
+        }
+    })
+    .detach();
+}
+
+/// Asynchronously kill the window backing `name` on whichever mux owns
+/// `domain_id`. Mirrors `dispatch_materialize_window_preset` so the kill
+/// path stays symmetric with materialize.
+fn dispatch_kill_window_preset(domain_id: DomainId, name: String) {
+    promise::spawn::spawn(async move {
+        if let Ok(inner) = ClientDomain::get_client_inner_for_domain(domain_id) {
+            let pdu = codec::KillWindowPreset { name: name.clone() };
+            if let Err(err) = inner.client.kill_window_preset(pdu).await {
+                log::error!("failed to kill window preset `{name}`: {err:#}");
+            }
+            return;
+        }
+
+        if let Err(err) = wezterm_mux_server_impl::window_presets::kill_window_preset(&name) {
+            log::error!("failed to kill window preset `{name}`: {err:#}");
         }
     })
     .detach();
@@ -387,6 +411,19 @@ impl LauncherState {
                 self.entries.push(Entry {
                     label: format!("{marker} {}", preset.name),
                     action: EntryAction::MaterializePreset {
+                        name: preset.name.clone(),
+                        domain_id: args.domain_id_of_current_tab,
+                    },
+                });
+            }
+        } else if args.flags.contains(LauncherFlags::WINDOW_PRESETS_KILL) {
+            for preset in &args.window_presets {
+                if !preset.is_running {
+                    continue;
+                }
+                self.entries.push(Entry {
+                    label: format!("Kill: {}", preset.name),
+                    action: EntryAction::KillPreset {
                         name: preset.name.clone(),
                         domain_id: args.domain_id_of_current_tab,
                     },
@@ -581,6 +618,13 @@ impl LauncherState {
                 // a thread-local executor. Hop to the main thread first.
                 self.window.notify(TermWindowNotif::Apply(Box::new(move |_| {
                     dispatch_materialize_window_preset(domain_id, name);
+                })));
+            }
+            EntryAction::KillPreset { name, domain_id } => {
+                // Hop to the main thread for the same reason as the
+                // MaterializePreset arm above.
+                self.window.notify(TermWindowNotif::Apply(Box::new(move |_| {
+                    dispatch_kill_window_preset(domain_id, name);
                 })));
             }
         }

@@ -35,6 +35,7 @@ bitflags::bitflags! {
         const WORKSPACES = 32;
         const COMMANDS = 64;
         const WINDOW_PRESETS = 128;
+        const WINDOW_PRESETS_KILL = 256;
     }
 }
 
@@ -77,6 +78,9 @@ impl ToString for LauncherFlags {
         if self.contains(Self::WINDOW_PRESETS) {
             s.push("WINDOW_PRESETS");
         }
+        if self.contains(Self::WINDOW_PRESETS_KILL) {
+            s.push("WINDOW_PRESETS_KILL");
+        }
         s.join("|")
     }
 }
@@ -97,6 +101,7 @@ impl TryFrom<String> for LauncherFlags {
                 "WORKSPACES" => flags |= Self::WORKSPACES,
                 "COMMANDS" => flags |= Self::COMMANDS,
                 "WINDOW_PRESETS" => flags |= Self::WINDOW_PRESETS,
+                "WINDOW_PRESETS_KILL" => flags |= Self::WINDOW_PRESETS_KILL,
                 _ => {
                     return Err(format!("invalid LauncherFlags `{}` in `{}`", ele, s));
                 }
