@@ -9,6 +9,7 @@ pub mod dispatch;
 pub mod local;
 pub mod pki;
 pub mod sessionhandler;
+pub mod window_presets;
 
 fn client_domains(config: &config::ConfigHandle) -> Vec<ClientDomainConfig> {
     let mut domains = vec![];

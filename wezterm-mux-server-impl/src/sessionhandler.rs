@@ -989,14 +989,37 @@ impl SessionHandler {
             }
 
             Pdu::Invalid { .. } => send_response(Err(anyhow!("invalid PDU {:?}", decoded.pdu))),
-            Pdu::ListWindowPresets { .. }
-            | Pdu::MaterializeWindowPreset { .. }
-            | Pdu::KillWindowPreset { .. } => {
-                // Implemented in a follow-up commit; until then, surface a
-                // clear error rather than hanging the client.
-                send_response(Err(anyhow!(
-                    "window preset PDUs are not yet implemented on this server"
-                )))
+            Pdu::ListWindowPresets(ListWindowPresets {}) => {
+                spawn_into_main_thread(async move {
+                    catch(
+                        move || {
+                            let presets = crate::window_presets::list_window_presets();
+                            Ok(Pdu::ListWindowPresetsResponse(ListWindowPresetsResponse {
+                                presets,
+                            }))
+                        },
+                        send_response,
+                    );
+                })
+                .detach();
+            }
+            Pdu::MaterializeWindowPreset(MaterializeWindowPreset { name }) => {
+                spawn_into_main_thread(async move {
+                    schedule_materialize_window_preset(name, send_response);
+                })
+                .detach();
+            }
+            Pdu::KillWindowPreset(KillWindowPreset { name }) => {
+                spawn_into_main_thread(async move {
+                    catch(
+                        move || {
+                            crate::window_presets::kill_window_preset(&name)?;
+                            Ok(Pdu::UnitResponse(UnitResponse {}))
+                        },
+                        send_response,
+                    );
+                })
+                .detach();
             }
             Pdu::Pong { .. }
             | Pdu::ListPanesResponse { .. }
@@ -1027,6 +1050,24 @@ impl SessionHandler {
             }
         }
     }
+}
+
+/// Same Send/!Send dance as the other schedule helpers in this file: the
+/// async body touches `Mux` internals that aren't `Send`, so we hop through
+/// a synchronous shim before spawning onto the main-thread executor.
+fn schedule_materialize_window_preset<SND>(name: String, send_response: SND)
+where
+    SND: Fn(anyhow::Result<Pdu>) + 'static,
+{
+    promise::spawn::spawn(async move {
+        let result = crate::window_presets::materialize_window_preset(&name)
+            .await
+            .map(|window_id| {
+                Pdu::MaterializeWindowPresetResponse(MaterializeWindowPresetResponse { window_id })
+            });
+        send_response(result);
+    })
+    .detach();
 }
 
 // Dancing around a little bit here; we can't directly spawn_into_main_thread the domain_spawn
