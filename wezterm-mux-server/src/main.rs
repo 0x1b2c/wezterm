@@ -281,6 +281,18 @@ async fn async_run(cmd: Option<CommandBuilder>) -> anyhow::Result<()> {
         }
     }
 
+    // Materialize the configured startup window presets after the
+    // `mux-startup` Lua event has had a chance to mutate state.
+    // Already-running presets are skipped by the helper.
+    for name in &config.startup_windows {
+        match wezterm_mux_server_impl::window_presets::materialize_window_preset(name).await {
+            Ok(_) => {}
+            Err(err) => {
+                log::error!("failed to materialize startup window preset `{name}`: {err:#}");
+            }
+        }
+    }
+
     let have_panes_in_domain = mux
         .iter_panes()
         .iter()
