@@ -1433,4 +1433,15 @@ impl Client {
         GetPaneDirectionResponse
     );
     rpc!(adjust_pane_size, AdjustPaneSize, UnitResponse);
+    rpc!(
+        list_window_presets,
+        ListWindowPresets = (),
+        ListWindowPresetsResponse
+    );
+    rpc!(
+        materialize_window_preset,
+        MaterializeWindowPreset,
+        MaterializeWindowPresetResponse
+    );
+    rpc!(kill_window_preset, KillWindowPreset, UnitResponse);
 }

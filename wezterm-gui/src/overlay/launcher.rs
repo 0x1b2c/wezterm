@@ -10,6 +10,7 @@ use crate::inputmap::InputMap;
 use crate::overlay::quickselect;
 use crate::overlay::selector::{matcher_pattern, matcher_score};
 use crate::termwindow::TermWindowNotif;
+use codec::WindowPresetStatus;
 use config::configuration;
 use config::keyassignment::{KeyAssignment, SpawnCommand, SpawnTabDomain};
 use mux::domain::{DomainId, DomainState};
@@ -25,14 +26,26 @@ use termwiz::input::{InputEvent, KeyCode, KeyEvent, Modifiers, MouseButtons, Mou
 use termwiz::surface::{Change, Position};
 use termwiz::terminal::Terminal;
 use termwiz_funcs::truncate_right;
+use wezterm_client::domain::ClientDomain;
 use window::WindowOps;
 
 pub use config::keyassignment::LauncherFlags;
 
 #[derive(Clone)]
+enum EntryAction {
+    /// A key assignment dispatched through the regular TermWindow path.
+    Assignment(KeyAssignment),
+    /// Materialize the named window preset on whichever mux owns
+    /// `domain_id_of_current_tab`. The selection closes the launcher
+    /// even when the preset is already running, in which case the call
+    /// becomes a no-op rather than focusing the existing window.
+    MaterializePreset { name: String, domain_id: DomainId },
+}
+
+#[derive(Clone)]
 struct Entry {
     pub label: String,
-    pub action: KeyAssignment,
+    pub action: EntryAction,
 }
 
 pub struct LauncherTabEntry {
@@ -58,6 +71,10 @@ pub struct LauncherArgs {
     title: String,
     active_workspace: String,
     workspaces: Vec<String>,
+    /// Window presets known to the mux that owns the current pane, with
+    /// their running state. Empty unless `WINDOW_PRESETS` (or
+    /// `WINDOW_PRESETS_KILL`) is set.
+    window_presets: Vec<WindowPresetStatus>,
     help_text: String,
     fuzzy_help_text: String,
     alphabet: String,
@@ -153,6 +170,12 @@ impl LauncherArgs {
             vec![]
         };
 
+        let window_presets = if flags.contains(LauncherFlags::WINDOW_PRESETS) {
+            fetch_window_presets(domain_id_of_current_tab).await
+        } else {
+            vec![]
+        };
+
         Self {
             flags,
             domains,
@@ -162,11 +185,57 @@ impl LauncherArgs {
             title: title.to_string(),
             workspaces,
             active_workspace,
+            window_presets,
             help_text: help_text.to_string(),
             fuzzy_help_text: fuzzy_help_text.to_string(),
             alphabet: alphabet.to_string(),
         }
     }
+}
+
+/// Pull the preset list from the mux that owns `domain_id_of_current_tab`.
+///
+/// When the owning domain is a remote `ClientDomain` we go via the mux
+/// protocol so the response reflects the *server's* configuration, which
+/// can differ from the GUI process's local config. For a local mux we fall
+/// back to the in-process helper.
+async fn fetch_window_presets(domain_id_of_current_tab: DomainId) -> Vec<WindowPresetStatus> {
+    if let Ok(inner) = ClientDomain::get_client_inner_for_domain(domain_id_of_current_tab) {
+        match inner.client.list_window_presets().await {
+            Ok(resp) => return resp.presets,
+            Err(err) => {
+                log::error!("failed to list window presets via mux client: {err:#}");
+                return vec![];
+            }
+        }
+    }
+
+    // Local mux: helper reads the same configuration this process is
+    // already loading.
+    wezterm_mux_server_impl::window_presets::list_window_presets()
+}
+
+/// Asynchronously materialize `name` on whichever mux owns `domain_id`.
+///
+/// The launcher fires this from its UI thread; we hop onto a promise so the
+/// terminal can close immediately rather than blocking on the round trip.
+fn dispatch_materialize_window_preset(domain_id: DomainId, name: String) {
+    promise::spawn::spawn(async move {
+        if let Ok(inner) = ClientDomain::get_client_inner_for_domain(domain_id) {
+            let pdu = codec::MaterializeWindowPreset { name: name.clone() };
+            if let Err(err) = inner.client.materialize_window_preset(pdu).await {
+                log::error!("failed to materialize window preset `{name}`: {err:#}");
+            }
+            return;
+        }
+
+        if let Err(err) =
+            wezterm_mux_server_impl::window_presets::materialize_window_preset(&name).await
+        {
+            log::error!("failed to materialize window preset `{name}`: {err:#}");
+        }
+    })
+    .detach();
 }
 
 const ROW_OVERHEAD: usize = 3;
@@ -240,7 +309,9 @@ impl LauncherState {
                             None => "(default shell)".to_string(),
                         },
                     },
-                    action: KeyAssignment::SpawnCommandInNewTab(item.clone()),
+                    action: EntryAction::Assignment(KeyAssignment::SpawnCommandInNewTab(
+                        item.clone(),
+                    )),
                 });
             }
         }
@@ -249,15 +320,19 @@ impl LauncherState {
             let entry = if domain.state == DomainState::Attached {
                 Entry {
                     label: format!("New Tab ({})", domain.label),
-                    action: KeyAssignment::SpawnCommandInNewTab(SpawnCommand {
-                        domain: SpawnTabDomain::DomainName(domain.name.to_string()),
-                        ..SpawnCommand::default()
-                    }),
+                    action: EntryAction::Assignment(KeyAssignment::SpawnCommandInNewTab(
+                        SpawnCommand {
+                            domain: SpawnTabDomain::DomainName(domain.name.to_string()),
+                            ..SpawnCommand::default()
+                        },
+                    )),
                 }
             } else {
                 Entry {
                     label: format!("Attach {}", domain.label),
-                    action: KeyAssignment::AttachDomain(domain.name.to_string()),
+                    action: EntryAction::Assignment(KeyAssignment::AttachDomain(
+                        domain.name.to_string(),
+                    )),
                 }
             };
 
@@ -275,10 +350,10 @@ impl LauncherState {
                 if *ws != args.active_workspace {
                     self.entries.push(Entry {
                         label: format!("Switch to workspace: `{}`", ws),
-                        action: KeyAssignment::SwitchToWorkspace {
+                        action: EntryAction::Assignment(KeyAssignment::SwitchToWorkspace {
                             name: Some(ws.clone()),
                             spawn: None,
-                        },
+                        }),
                     });
                 }
             }
@@ -287,10 +362,10 @@ impl LauncherState {
                     "Create new Workspace (current is `{}`)",
                     args.active_workspace
                 ),
-                action: KeyAssignment::SwitchToWorkspace {
+                action: EntryAction::Assignment(KeyAssignment::SwitchToWorkspace {
                     name: None,
                     spawn: None,
-                },
+                }),
             });
         }
 
@@ -300,8 +375,23 @@ impl LauncherState {
                     Some(pane_count) => format!("{}. {pane_count} panes", tab.title),
                     None => format!("{}.", tab.title),
                 },
-                action: KeyAssignment::ActivateTab(tab.tab_idx as isize),
+                action: EntryAction::Assignment(KeyAssignment::ActivateTab(tab.tab_idx as isize)),
             });
+        }
+
+        if args.flags.contains(LauncherFlags::WINDOW_PRESETS) {
+            for preset in &args.window_presets {
+                // Filled glyph for running, empty for closed: keeps the
+                // status visually obvious without adding a separate column.
+                let marker = if preset.is_running { "●" } else { "○" };
+                self.entries.push(Entry {
+                    label: format!("{marker} {}", preset.name),
+                    action: EntryAction::MaterializePreset {
+                        name: preset.name.clone(),
+                        domain_id: args.domain_id_of_current_tab,
+                    },
+                });
+            }
         }
 
         if args.flags.contains(LauncherFlags::COMMANDS) {
@@ -316,7 +406,7 @@ impl LauncherState {
                 }
                 self.entries.push(Entry {
                     label: format!("{}. {}", cmd.brief, cmd.doc),
-                    action: cmd.action,
+                    action: EntryAction::Assignment(cmd.action),
                 });
             }
         }
@@ -335,11 +425,10 @@ impl LauncherState {
                     // Filter out some noisy, repetitive entries
                     continue;
                 }
-                if key_entries
-                    .iter()
-                    .find(|ent| ent.action == entry.action)
-                    .is_some()
-                {
+                if key_entries.iter().any(|ent| match &ent.action {
+                    EntryAction::Assignment(a) => a == &entry.action,
+                    _ => false,
+                }) {
                     // Avoid duplicate entries
                     continue;
                 }
@@ -356,7 +445,7 @@ impl LauncherState {
 
                 key_entries.push(Entry {
                     label,
-                    action: entry.action,
+                    action: EntryAction::Assignment(entry.action),
                 });
             }
             key_entries.sort_by(|a, b| a.label.cmp(&b.label));
@@ -475,17 +564,27 @@ impl LauncherState {
     }
 
     fn launch(&self, active_idx: usize) -> bool {
-        if let Some(entry) = self.filtered_entries.get(active_idx) {
-            let assignment = entry.action.clone();
-            self.window.notify(TermWindowNotif::PerformAssignment {
-                pane_id: self.pane_id,
-                assignment,
-                tx: None,
-            });
-            true
-        } else {
-            false
+        let Some(entry) = self.filtered_entries.get(active_idx) else {
+            return false;
+        };
+        match entry.action.clone() {
+            EntryAction::Assignment(assignment) => {
+                self.window.notify(TermWindowNotif::PerformAssignment {
+                    pane_id: self.pane_id,
+                    assignment,
+                    tx: None,
+                });
+            }
+            EntryAction::MaterializePreset { name, domain_id } => {
+                // The launcher overlay runs on a worker thread, but
+                // dispatch_* relies on `promise::spawn::spawn` which uses
+                // a thread-local executor. Hop to the main thread first.
+                self.window.notify(TermWindowNotif::Apply(Box::new(move |_| {
+                    dispatch_materialize_window_preset(domain_id, name);
+                })));
+            }
         }
+        true
     }
 
     fn move_up(&mut self) {
