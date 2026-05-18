@@ -15,7 +15,7 @@
 use anyhow::{bail, Context as _, Error};
 use config::keyassignment::{PaneDirection, ScrollbackEraseMode};
 use mux::client::{ClientId, ClientInfo};
-use mux::pane::PaneId;
+use mux::pane::{InputMode, PaneId};
 use mux::renderable::{RenderableDimensions, StableCursorPosition};
 use mux::tab::{PaneNode, SerdeUrl, SplitRequest, TabId};
 use mux::window::WindowId;
@@ -442,7 +442,7 @@ macro_rules! pdu {
 /// The overall version of the codec.
 /// This must be bumped when backwards incompatible changes
 /// are made to the types and protocol.
-pub const CODEC_VERSION: usize = 46;
+pub const CODEC_VERSION: usize = 47;
 
 // Defines the Pdu enum.
 // Each struct has an explicit identifying number.
@@ -508,6 +508,8 @@ pdu! {
     MaterializeWindowPreset: 65,
     MaterializeWindowPresetResponse: 66,
     KillWindowPreset: 67,
+    SetPaneInputMode: 68,
+    PaneInputModeChanged: 69,
 }
 
 impl Pdu {
@@ -523,6 +525,7 @@ impl Pdu {
             | Self::Resize(_)
             | Self::SetClipboard(_)
             | Self::SetPaneZoomed(_)
+            | Self::SetPaneInputMode(_)
             | Self::SpawnV2(_) => true,
             _ => false,
         }
@@ -601,6 +604,7 @@ impl Pdu {
             | Pdu::NotifyAlert(NotifyAlert { pane_id, .. })
             | Pdu::SetClipboard(SetClipboard { pane_id, .. })
             | Pdu::PaneFocused(PaneFocused { pane_id })
+            | Pdu::PaneInputModeChanged(PaneInputModeChanged { pane_id, .. })
             | Pdu::PaneRemoved(PaneRemoved { pane_id }) => Some(*pane_id),
             _ => None,
         }
@@ -1164,6 +1168,22 @@ pub struct SearchScrollbackRequest {
 #[derive(Deserialize, Serialize, PartialEq, Debug)]
 pub struct SearchScrollbackResponse {
     pub results: Vec<mux::pane::SearchResult>,
+}
+
+/// Request from client to server: switch the named pane between
+/// `Direct` and `Local` input mode.
+#[derive(Deserialize, Serialize, PartialEq, Debug)]
+pub struct SetPaneInputMode {
+    pub pane_id: PaneId,
+    pub mode: InputMode,
+}
+
+/// Server-to-client unilateral notification that the pane's input mode
+/// has changed (regardless of which client initiated the change).
+#[derive(Deserialize, Serialize, PartialEq, Debug)]
+pub struct PaneInputModeChanged {
+    pub pane_id: PaneId,
+    pub mode: InputMode,
 }
 
 #[derive(Deserialize, Serialize, PartialEq, Debug)]

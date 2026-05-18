@@ -8,8 +8,8 @@ use config::configuration;
 use config::keyassignment::ScrollbackEraseMode;
 use mux::domain::DomainId;
 use mux::pane::{
-    alloc_pane_id, CachePolicy, CloseReason, ForEachPaneLogicalLine, LogicalLine, Pane, PaneId,
-    Pattern, SearchResult, WithPaneLines,
+    alloc_pane_id, CachePolicy, CloseReason, ForEachPaneLogicalLine, InputMode, LogicalLine, Pane,
+    PaneId, Pattern, SearchResult, WithPaneLines,
 };
 use mux::renderable::{RenderableDimensions, StableCursorPosition};
 use mux::tab::TabId;
@@ -77,6 +77,11 @@ pub struct ClientPane {
     /// idle-timeout exit from a burst. Mirrors
     /// `TerminalState::osc_title_last_update`.
     osc_title_last_update: Mutex<Option<Instant>>,
+    /// Cached `InputMode` for this pane, replicated from the server. The
+    /// authoritative state lives on the mux server side; this copy is updated
+    /// on initial sync (`PaneEntry`) and via the `PaneInputModeChanged`
+    /// unilateral PDU.
+    input_mode: Mutex<InputMode>,
 }
 
 impl ClientPane {
@@ -162,6 +167,7 @@ impl ClientPane {
             osc_title_burst_history: Mutex::new(VecDeque::with_capacity(OSC_TITLE_BURST_COUNT)),
             osc_title_burst_active: Mutex::new(false),
             osc_title_last_update: Mutex::new(None),
+            input_mode: Mutex::new(InputMode::default()),
         }
     }
 
@@ -249,6 +255,9 @@ impl ClientPane {
                 mux.prune_dead_windows();
 
                 self.client.expire_stale_mappings();
+            }
+            Pdu::PaneInputModeChanged(PaneInputModeChanged { mode, .. }) => {
+                self.update_cached_input_mode(mode);
             }
             Pdu::PaneFocused(PaneFocused { pane_id }) => {
                 // We get here whenever the pane focus is changed on the
@@ -729,6 +738,71 @@ impl Pane for ClientPane {
 
     fn get_config(&self) -> Option<Arc<dyn TerminalConfiguration>> {
         self.config.lock().clone()
+    }
+
+    fn input_mode(&self) -> InputMode {
+        *self.input_mode.lock()
+    }
+
+    fn render_local_input(
+        &self,
+        anchor: StableCursorPosition,
+        text: &str,
+        prev_lines_used: usize,
+    ) -> usize {
+        let render = self.renderable.lock();
+        let mut inner = render.inner.borrow_mut();
+        inner.render_local_input(anchor, text, prev_lines_used)
+    }
+
+    fn set_input_mode(&self, mode: InputMode) {
+        // Optimistically update the cached value so the GUI sees the new
+        // mode immediately; the authoritative server-side update arrives via
+        // the `PaneInputModeChanged` unilateral PDU.
+        self.update_cached_input_mode(mode);
+        let client = Arc::clone(&self.client);
+        let remote_pane_id = self.remote_pane_id;
+        promise::spawn::spawn(async move {
+            client
+                .client
+                .set_input_mode(SetPaneInputMode {
+                    pane_id: remote_pane_id,
+                    mode,
+                })
+                .await
+        })
+        .detach();
+    }
+}
+
+impl ClientPane {
+    /// Update the locally cached input mode without sending a PDU. Used by
+    /// the domain layer when it processes a fresh `PaneEntry` from a
+    /// `ListPanes` response (e.g. on attach / reconnect).
+    pub fn apply_input_mode_from_server(&self, mode: InputMode) {
+        self.update_cached_input_mode(mode);
+    }
+
+    /// Compare-and-swap the cached input mode; on change, broadcast a local
+    /// `MuxNotification::PaneInputModeChanged` so GUI subscribers repaint.
+    /// Does not send any PDU — callers that need to push the new mode to the
+    /// remote server are responsible for doing so.
+    fn update_cached_input_mode(&self, mode: InputMode) {
+        let changed = {
+            let mut current = self.input_mode.lock();
+            if *current == mode {
+                false
+            } else {
+                *current = mode;
+                true
+            }
+        };
+        if changed {
+            Mux::get().notify(MuxNotification::PaneInputModeChanged {
+                pane_id: self.local_pane_id,
+                mode,
+            });
+        }
     }
 }
 

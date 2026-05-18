@@ -1,7 +1,7 @@
 use crate::domain::DomainId;
 use crate::pane::{
-    CachePolicy, CloseReason, ForEachPaneLogicalLine, LogicalLine, Pane, PaneId, Pattern,
-    SearchResult, WithPaneLines,
+    CachePolicy, CloseReason, ForEachPaneLogicalLine, InputMode, LogicalLine, Pane, PaneId,
+    Pattern, SearchResult, WithPaneLines,
 };
 use crate::renderable::*;
 use crate::tmux::{TmuxDomain, TmuxDomainState};
@@ -133,6 +133,7 @@ pub struct LocalPane {
     #[cfg(unix)]
     leader: Arc<Mutex<Option<CachedLeaderInfo>>>,
     command_description: String,
+    input_mode: Mutex<InputMode>,
 }
 
 #[async_trait(?Send)]
@@ -845,6 +846,109 @@ impl Pane for LocalPane {
 
         Ok(results)
     }
+
+    fn input_mode(&self) -> InputMode {
+        *self.input_mode.lock()
+    }
+
+    fn render_local_input(
+        &self,
+        anchor: StableCursorPosition,
+        text: &str,
+        prev_lines_used: usize,
+    ) -> usize {
+        // Synthesize an ANSI byte stream that, when fed into the local
+        // terminal parser, has exactly the visual effect we want:
+        //   1. Save the terminal's current cursor (so we can restore it
+        //      afterwards — the server-tracked cursor must stay put because
+        //      we have not actually sent any input to the PTY).
+        //   2. Reposition the cursor to the anchor.
+        //   3. Erase from cursor to end of screen, capped to `prev_extent`
+        //      lines so we don't clobber unrelated scrollback.
+        //   4. Write the buffer text (translating embedded `\n` to `\r\n`
+        //      since the terminal parser expects CR before LF to land at
+        //      column 0).
+        //   5. Restore the saved cursor.
+        // The bytes never reach the PTY — `advance_bytes` only mutates the
+        // local terminal model.
+        let mut term = self.terminal.lock();
+        let physical_top = term.screen().visible_row_to_stable_row(0);
+        let anchor_row = anchor.y - physical_top;
+        if anchor_row < 0 {
+            return prev_lines_used;
+        }
+        let viewport_rows = term.screen().physical_rows as i64;
+        if (anchor_row as i64) >= viewport_rows {
+            return prev_lines_used;
+        }
+        let cols = term.screen().physical_cols.max(1);
+
+        let prev_extent = prev_lines_used.max(1);
+        let mut bytes = String::new();
+        // ESC 7 saves cursor (DECSC); ESC 8 restores (DECRC). DECSC also
+        // saves SGR attributes which is exactly what we want.
+        bytes.push_str("\x1b7");
+        // Move cursor to anchor (1-based).
+        bytes.push_str(&format!(
+            "\x1b[{};{}H",
+            anchor_row as usize + 1,
+            anchor.x + 1
+        ));
+        // Erase all cells on the anchor row from the anchor column onward.
+        bytes.push_str("\x1b[K");
+        // Erase any subsequent rows used by the previous render in full.
+        for offset in 1..prev_extent {
+            let row = anchor_row as usize + offset;
+            if row >= viewport_rows as usize {
+                break;
+            }
+            bytes.push_str(&format!("\x1b[{};1H\x1b[K", row + 1));
+        }
+        // Reposition before writing the buffer.
+        bytes.push_str(&format!(
+            "\x1b[{};{}H",
+            anchor_row as usize + 1,
+            anchor.x + 1
+        ));
+        // Compute how many physical rows the rendered buffer will occupy
+        // so we can inform the caller, and write the buffer text.
+        let mut row_offset = 0usize;
+        let mut col = anchor.x;
+        for ch in text.chars() {
+            if ch == '\n' {
+                bytes.push_str("\r\n");
+                row_offset += 1;
+                col = 0;
+                continue;
+            }
+            let ch_str = ch.to_string();
+            let width = wezterm_term::unicode_column_width(&ch_str, None).max(1);
+            if col + width > cols {
+                row_offset += 1;
+                col = 0;
+            }
+            bytes.push(ch);
+            col += width;
+        }
+        // Restore the original cursor position so the server-visible cursor
+        // does not drift (the writer-bound side never saw any of this).
+        bytes.push_str("\x1b8");
+        term.advance_bytes(bytes.as_bytes());
+        row_offset + 1
+    }
+
+    fn set_input_mode(&self, mode: InputMode) {
+        let mut current = self.input_mode.lock();
+        if *current == mode {
+            return;
+        }
+        *current = mode;
+        drop(current);
+        Mux::get().notify(MuxNotification::PaneInputModeChanged {
+            pane_id: self.pane_id,
+            mode,
+        });
+    }
 }
 
 struct LocalPaneDCSHandler {
@@ -1041,6 +1145,7 @@ impl LocalPane {
             #[cfg(unix)]
             leader: Arc::new(Mutex::new(None)),
             command_description,
+            input_mode: Mutex::new(InputMode::default()),
         }
     }
 

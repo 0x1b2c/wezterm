@@ -585,6 +585,23 @@ impl SessionHandler {
                 .detach();
             }
 
+            Pdu::SetPaneInputMode(SetPaneInputMode { pane_id, mode }) => {
+                spawn_into_main_thread(async move {
+                    catch(
+                        move || {
+                            let mux = Mux::get();
+                            let pane = mux
+                                .get_pane(pane_id)
+                                .ok_or_else(|| anyhow!("no such pane {}", pane_id))?;
+                            pane.set_input_mode(mode);
+                            Ok(Pdu::UnitResponse(UnitResponse {}))
+                        },
+                        send_response,
+                    )
+                })
+                .detach();
+            }
+
             Pdu::GetPaneDirection(GetPaneDirection { pane_id, direction }) => {
                 spawn_into_main_thread(async move {
                     catch(
@@ -1038,6 +1055,7 @@ impl SessionHandler {
             | Pdu::GetClientListResponse { .. }
             | Pdu::PaneRemoved { .. }
             | Pdu::PaneFocused { .. }
+            | Pdu::PaneInputModeChanged { .. }
             | Pdu::TabResized { .. }
             | Pdu::GetImageCellResponse { .. }
             | Pdu::MovePaneToNewTabResponse { .. }

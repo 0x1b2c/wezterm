@@ -580,7 +580,8 @@ impl ClientDomain {
                 tab.sync_with_pane_tree(root_size, tabroot, |entry| {
                     workspace.replace(entry.workspace.clone());
                     remote_panes_to_forget.remove(&entry.pane_id);
-                    if let Some(pane_id) = inner.remote_to_local_pane_id(entry.pane_id) {
+                    let entry_input_mode = entry.input_mode;
+                    let pane = if let Some(pane_id) = inner.remote_to_local_pane_id(entry.pane_id) {
                         match mux.get_pane(pane_id) {
                             Some(pane) => pane,
                             None => {
@@ -615,7 +616,11 @@ impl ClientDomain {
                         );
                         mux.add_pane(&pane).expect("failed to add pane to mux");
                         pane
+                    };
+                    if let Some(client_pane) = pane.downcast_ref::<ClientPane>() {
+                        client_pane.apply_input_mode_from_server(entry_input_mode);
                     }
+                    pane
                 });
 
                 if let Some(local_window_id) = inner.remote_to_local_window(remote_window_id) {

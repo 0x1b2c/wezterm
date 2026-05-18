@@ -1397,6 +1397,7 @@ impl Client {
     rpc!(mouse_event, SendMouseEvent, UnitResponse);
     rpc!(resize, Resize, UnitResponse);
     rpc!(set_zoomed, SetPaneZoomed, UnitResponse);
+    rpc!(set_input_mode, SetPaneInputMode, UnitResponse);
     rpc!(activate_pane_direction, ActivatePaneDirection, UnitResponse);
     rpc!(
         get_pane_render_changes,
