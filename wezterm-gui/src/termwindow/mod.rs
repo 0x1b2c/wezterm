@@ -74,6 +74,7 @@ pub mod box_model;
 pub mod charselect;
 pub mod clipboard;
 pub mod keyevent;
+pub mod local_input;
 pub mod modal;
 mod mouseevent;
 pub mod palette;
@@ -208,6 +209,16 @@ pub struct PaneState {
 
     bell_start: Option<Instant>,
     pub mouse_terminal_coords: Option<(ClickPosition, StableRowIndex)>,
+
+    /// Buffer state for `InputMode::Local`. The mode itself lives on the
+    /// pane (replicated from the mux server); the editor's transient
+    /// keystroke buffer is GUI-local because it is only meaningful for
+    /// the client doing the typing.
+    pub local_input: local_input::LineEditorState,
+    /// Number of physical rows the previous Local-mode render occupied;
+    /// fed back into `Pane::render_local_input` so deletions can erase
+    /// previously rendered cells.
+    pub local_input_prev_rows: usize,
 }
 
 /// Data used when synchronously formatting pane and window titles
@@ -1338,6 +1349,10 @@ impl TermWindow {
                 MuxNotification::TabTitleChanged { .. } => {
                     self.update_title_post_status();
                 }
+                MuxNotification::PaneInputModeChanged { .. } => {
+                    // Repaint so the cursor color reflects the new mode.
+                    window.invalidate();
+                }
                 MuxNotification::PaneAdded(_)
                 | MuxNotification::WorkspaceRenamed { .. }
                 | MuxNotification::PaneRemoved(_)
@@ -1495,6 +1510,7 @@ impl TermWindow {
                     | Alert::Bell,
             }
             | MuxNotification::PaneFocused(pane_id)
+            | MuxNotification::PaneInputModeChanged { pane_id, .. }
             | MuxNotification::PaneRemoved(pane_id)
             | MuxNotification::PaneOutput(pane_id) => {
                 // Check window validity and propagate to the window event handler
@@ -3009,6 +3025,9 @@ impl TermWindow {
                 };
                 tab.toggle_zoom();
             }
+            ToggleInputMode => {
+                self.toggle_pane_input_mode(pane);
+            }
             SetPaneZoomState(zoomed) => {
                 let mux = Mux::get();
                 let tab = match mux.get_active_tab_for_window(self.mux_window_id) {
@@ -3304,6 +3323,190 @@ impl TermWindow {
         RefMut::map(self.pane_state.borrow_mut(), |state| {
             state.entry(pane_id).or_insert_with(PaneState::default)
         })
+    }
+
+    /// Flip the pane between `Direct` and `Local` input mode. If we are
+    /// leaving Local mode with a non-empty buffer, drain it through the
+    /// pane's writer (the same path direct-mode keystrokes take) so no
+    /// typed characters are silently lost.
+    pub fn toggle_pane_input_mode(&self, pane: &Arc<dyn Pane>) {
+        use mux::pane::InputMode;
+        let pane_id = pane.pane_id();
+        let current = pane.input_mode();
+        let next = match current {
+            InputMode::Direct => InputMode::Local,
+            InputMode::Local => InputMode::Direct,
+        };
+
+        if current == InputMode::Local {
+            // Leaving Local: drain any buffered text through the writer so
+            // it reaches the PTY, equivalent to the user having typed each
+            // character in Direct mode.
+            let mut state = self.pane_state(pane_id);
+            let drained: String = state.local_input.buffer_text();
+            state.local_input.reset();
+            state.local_input_prev_rows = 0;
+            drop(state);
+            if !drained.is_empty() {
+                if let Err(err) = pane.writer().write_all(drained.as_bytes()) {
+                    log::error!(
+                        "failed to drain Local-mode buffer on toggle for pane {}: {:#}",
+                        pane_id,
+                        err
+                    );
+                }
+            }
+        } else {
+            // Entering Local: capture an anchor at the current cursor.
+            let mut state = self.pane_state(pane_id);
+            state.local_input.reset();
+            state.local_input.ensure_anchor(pane);
+            state.local_input_prev_rows = 0;
+        }
+
+        pane.set_input_mode(next);
+    }
+
+    /// Route a key event to the pane's Local-mode line editor. Returns
+    /// `true` iff the key was consumed by the editor; `false` means the
+    /// caller should fall through to the normal direct-mode dispatch.
+    pub fn route_key_to_local_input(
+        &self,
+        pane: &Arc<dyn Pane>,
+        key: &::wezterm_term::KeyCode,
+        mods: ::wezterm_term::KeyModifiers,
+    ) -> bool {
+        use ::wezterm_term::{KeyCode, KeyModifiers};
+        use local_input::LineEditorAction;
+
+        let pane_id = pane.pane_id();
+        let action = {
+            let mut state = self.pane_state(pane_id);
+            state.local_input.ensure_anchor(pane);
+            let editor = &mut state.local_input;
+            let ctrl = mods.contains(KeyModifiers::CTRL);
+            let shift = mods.contains(KeyModifiers::SHIFT);
+            let alt = mods.contains(KeyModifiers::ALT);
+            // Disallow Alt-modified bindings — fall through to the normal
+            // dispatch so users can still send Meta keys to apps.
+            if alt {
+                return false;
+            }
+            match (key, ctrl, shift) {
+                (KeyCode::Enter, false, false) => editor.submit(),
+                (KeyCode::Enter, false, true) => editor.insert_newline(),
+                (KeyCode::Backspace, false, _) => editor.delete_before_cursor(),
+                (KeyCode::Delete, false, _) => editor.delete_at_cursor(),
+                (KeyCode::LeftArrow, false, _) => editor.move_left(),
+                (KeyCode::RightArrow, false, _) => editor.move_right(),
+                (KeyCode::UpArrow, false, _) => editor.move_up(),
+                (KeyCode::DownArrow, false, _) => editor.move_down(),
+                (KeyCode::Home, false, _) => editor.move_to_line_start(),
+                (KeyCode::End, false, _) => editor.move_to_line_end(),
+                (KeyCode::Char('a'), true, false) | (KeyCode::Char('A'), true, false) => {
+                    editor.move_to_line_start()
+                }
+                (KeyCode::Char('e'), true, false) | (KeyCode::Char('E'), true, false) => {
+                    editor.move_to_line_end()
+                }
+                (KeyCode::Char('b'), true, false) | (KeyCode::Char('B'), true, false) => {
+                    editor.move_left()
+                }
+                (KeyCode::Char('f'), true, false) | (KeyCode::Char('F'), true, false) => {
+                    editor.move_right()
+                }
+                (KeyCode::Char('b'), true, true) | (KeyCode::Char('B'), true, true) => {
+                    editor.move_word_left()
+                }
+                (KeyCode::Char('f'), true, true) | (KeyCode::Char('F'), true, true) => {
+                    editor.move_word_right()
+                }
+                (KeyCode::Char('p'), true, false) | (KeyCode::Char('P'), true, false) => {
+                    editor.move_up()
+                }
+                (KeyCode::Char('n'), true, false) | (KeyCode::Char('N'), true, false) => {
+                    editor.move_down()
+                }
+                (KeyCode::Char('w'), true, false) | (KeyCode::Char('W'), true, false) => {
+                    editor.delete_word_before_cursor()
+                }
+                (KeyCode::Char('u'), true, false) | (KeyCode::Char('U'), true, false) => {
+                    editor.delete_to_line_start()
+                }
+                (KeyCode::Char('k'), true, false) | (KeyCode::Char('K'), true, false) => {
+                    editor.delete_to_line_end()
+                }
+                (KeyCode::Char(c), false, _) => editor.insert_char(*c),
+                _ => return false,
+            }
+        };
+
+        match action {
+            LineEditorAction::NoOp => true,
+            LineEditorAction::Updated => {
+                self.refresh_local_input_render(pane);
+                true
+            }
+            LineEditorAction::Submit { payload } => {
+                {
+                    let mut state = self.pane_state(pane_id);
+                    state.local_input_prev_rows = 0;
+                }
+                if let Err(err) = pane.writer().write_all(payload.as_bytes()) {
+                    log::error!(
+                        "failed to flush Local-mode buffer on submit for pane {}: {:#}",
+                        pane_id,
+                        err
+                    );
+                }
+                true
+            }
+        }
+    }
+
+    /// Route an IME-composed (or otherwise multi-character) text chunk to
+    /// the pane's Local-mode line editor. Returns `true` iff the editor
+    /// consumed the text; `false` means the caller should fall through to
+    /// the normal direct-mode writer path.
+    pub fn route_composed_to_local_input(&self, pane: &Arc<dyn Pane>, text: &str) -> bool {
+        use local_input::LineEditorAction;
+
+        if text.is_empty() {
+            return false;
+        }
+        let pane_id = pane.pane_id();
+        let action = {
+            let mut state = self.pane_state(pane_id);
+            state.local_input.ensure_anchor(pane);
+            state.local_input.insert_str(text)
+        };
+        match action {
+            LineEditorAction::NoOp => true,
+            LineEditorAction::Updated => {
+                self.refresh_local_input_render(pane);
+                true
+            }
+            // `insert_str` never submits; defensive arm in case the action
+            // surface grows later.
+            LineEditorAction::Submit { .. } => true,
+        }
+    }
+
+    /// Re-render the Local-mode editor's buffer into the pane's display.
+    /// Called every time the buffer changes.
+    pub fn refresh_local_input_render(&self, pane: &Arc<dyn Pane>) {
+        let pane_id = pane.pane_id();
+        let state = self.pane_state(pane_id);
+        let anchor = match state.local_input.anchor() {
+            Some(a) => a,
+            None => return,
+        };
+        let text = state.local_input.buffer_text();
+        let prev = state.local_input_prev_rows;
+        drop(state);
+        let new_rows = pane.render_local_input(anchor, &text, prev);
+        let mut state = self.pane_state(pane_id);
+        state.local_input_prev_rows = new_rows;
     }
 
     pub fn tab_state(&self, tab_id: TabId) -> RefMut<'_, TabState> {

@@ -685,6 +685,13 @@ pub enum KeyAssignment {
     PromptInputLine(PromptInputLine),
     InputSelector(InputSelector),
     Confirmation(Confirmation),
+
+    /// Toggle the active pane between `Direct` and `Local` input mode.
+    /// In Local mode, keystrokes are buffered by a client-side line editor
+    /// and only transmitted to the PTY on Enter, eliminating per-keystroke
+    /// network roundtrips for chat-style / long-form input over a mux
+    /// connection.
+    ToggleInputMode,
 }
 impl_lua_conversion_dynamic!(KeyAssignment);
 

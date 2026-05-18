@@ -2011,6 +2011,18 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             menubar: &["Edit"],
             icon: None,
         },
+        ToggleInputMode => CommandDef {
+            brief: "Toggle Local input mode".into(),
+            doc: "Switch the active pane between Direct and Local input \
+                  mode. In Local mode, keystrokes are buffered by a \
+                  client-side line editor and only sent to the PTY on \
+                  Enter, eliminating per-keystroke network round-trips."
+                .into(),
+            keys: vec![],
+            args: &[ArgType::ActivePane],
+            menubar: &["Shell"],
+            icon: None,
+        },
     })
 }
 
@@ -2040,6 +2052,7 @@ fn compute_default_actions() -> Vec<KeyAssignment> {
         CloseCurrentPane { confirm: true },
         DetachDomain(SpawnTabDomain::CurrentPaneDomain),
         ResetTerminal,
+        ToggleInputMode,
         // ----------------- Edit
         #[cfg(not(target_os = "macos"))]
         PasteFrom(ClipboardPasteSource::PrimarySelection),

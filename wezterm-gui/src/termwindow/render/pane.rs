@@ -298,9 +298,15 @@ impl crate::TermWindow {
         let selection_fg = palette.selection_fg.to_linear();
         let selection_bg = palette.selection_bg.to_linear();
         let cursor_fg = palette.cursor_fg.to_linear();
-        let cursor_bg = palette.cursor_bg.to_linear();
-        let cursor_is_default_color =
-            palette.cursor_fg == global_cursor_fg && palette.cursor_bg == global_cursor_bg;
+        let in_local_input_mode = pos.pane.input_mode() == mux::pane::InputMode::Local;
+        let cursor_bg = if in_local_input_mode {
+            self.config.local_input_mode_cursor_bg.to_linear()
+        } else {
+            palette.cursor_bg.to_linear()
+        };
+        let cursor_is_default_color = !in_local_input_mode
+            && palette.cursor_fg == global_cursor_fg
+            && palette.cursor_bg == global_cursor_bg;
 
         {
             let stable_range = match current_viewport {
