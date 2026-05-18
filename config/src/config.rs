@@ -189,6 +189,13 @@ pub struct Config {
     #[dynamic(default = "default_pane_select_bg_color")]
     pub pane_select_bg_color: RgbaColor,
 
+    /// Background color used for the cursor while a pane is in Local input
+    /// mode. The default is a vivid amber that contrasts with most palettes
+    /// and gives the user an unambiguous signal that keystrokes are being
+    /// buffered locally rather than sent to the PTY.
+    #[dynamic(default = "default_local_input_mode_cursor_bg")]
+    pub local_input_mode_cursor_bg: RgbaColor,
+
     #[dynamic(default)]
     pub tab_bar_style: TabBarStyle,
 
@@ -1651,6 +1658,11 @@ fn default_pane_select_bg_color() -> RgbaColor {
 
 fn default_pane_select_font_size() -> f64 {
     36.0
+}
+
+fn default_local_input_mode_cursor_bg() -> RgbaColor {
+    // A vivid amber. Distinct from typical cursor and palette colors.
+    (0xff, 0xa5, 0x00).into()
 }
 
 fn default_integrated_title_buttons() -> Vec<IntegratedTitleButton> {

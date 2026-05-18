@@ -360,6 +360,28 @@ impl super::TermWindow {
                 if let Key::Code(term_key) = self.win_key_code_to_termwiz_key_code(keycode) {
                     let tw_raw_modifiers = raw_modifiers;
 
+                    // If the pane is in Local input mode, intercept the
+                    // keystroke before any encoding/transmission happens.
+                    // wezterm-level key bindings already had their chance
+                    // upstream of this point (they take precedence over
+                    // Local mode), so anything reaching here is genuine
+                    // user-text input that should accumulate in the
+                    // editor buffer rather than fly across the network.
+                    if pane.input_mode() == ::mux::pane::InputMode::Local
+                        && is_down
+                        && !keycode.is_modifier()
+                        && self.route_key_to_local_input(&pane, &term_key, tw_raw_modifiers)
+                    {
+                        if self.pane_state(pane.pane_id()).overlay.is_none() {
+                            self.maybe_scroll_to_bottom_for_input(&pane);
+                        }
+                        if self.config.hide_mouse_cursor_when_typing {
+                            context.set_cursor(None);
+                        }
+                        context.invalidate();
+                        return true;
+                    }
+
                     let mut did_encode = false;
                     if let Some(key_event) = key_event {
                         if let Some(encoded) = self.encode_win32_input(&pane, &key_event) {
@@ -671,6 +693,26 @@ impl super::TermWindow {
                     return;
                 }
 
+                // Pane in Local input mode: intercept text input and route
+                // it to the GUI-side line editor instead of sending it to
+                // the PTY. The wezterm key-binding lookup above has
+                // already had its turn, so anything that lands here is
+                // user text the editor should buffer.
+                if pane.input_mode() == ::mux::pane::InputMode::Local
+                    && window_key.key_is_down
+                    && !key.is_modifier()
+                    && self.route_key_to_local_input(&pane, &key, modifiers)
+                {
+                    if self.pane_state(pane.pane_id()).overlay.is_none() {
+                        self.maybe_scroll_to_bottom_for_input(&pane);
+                    }
+                    if self.config.hide_mouse_cursor_when_typing {
+                        context.set_cursor(None);
+                    }
+                    context.invalidate();
+                    return;
+                }
+
                 let res = if let Some(encoded) = self.encode_win32_input(&pane, &window_key) {
                     if self.config.debug_key_events {
                         log::info!("win32: Encoded input as {:?}", encoded);
@@ -734,6 +776,18 @@ impl super::TermWindow {
                 self.key_table_state.did_process_key();
                 if self.config.debug_key_events {
                     log::info!("send to pane string={:?}", s);
+                }
+                // Local input mode: IME-composed text should accumulate in
+                // the line editor buffer just like single-character input,
+                // so it's echoed locally and only transmitted on submit.
+                if pane.input_mode() == ::mux::pane::InputMode::Local
+                    && self.route_composed_to_local_input(&pane, &s)
+                {
+                    if self.pane_state(pane.pane_id()).overlay.is_none() {
+                        self.maybe_scroll_to_bottom_for_input(&pane);
+                    }
+                    context.invalidate();
+                    return;
                 }
                 if let Err(err) = pane.send_composed_text(&s) {
                     log::error!("failed to send composed text to pane: {err:#}");

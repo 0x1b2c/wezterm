@@ -95,6 +95,10 @@ pub enum MuxNotification {
         old_workspace: String,
         new_workspace: String,
     },
+    PaneInputModeChanged {
+        pane_id: PaneId,
+        mode: crate::pane::InputMode,
+    },
 }
 
 static LAST_SUBSCRIBER_ID: AtomicUsize = AtomicUsize::new(0);

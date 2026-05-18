@@ -28,6 +28,24 @@ pub fn alloc_pane_id() -> PaneId {
     PANE_ID.fetch_add(1, ::std::sync::atomic::Ordering::Relaxed)
 }
 
+/// Per-pane input mode.
+///
+/// `Direct`: keystrokes are sent to the pane's PTY (or to the remote PTY via
+/// the mux client) one at a time, the conventional behavior.
+///
+/// `Local`: keystrokes are buffered on the GUI side by a client-side line
+/// editor, displayed locally at the pane's cursor without crossing the
+/// network, and only transmitted to the PTY when the user submits the line
+/// (Enter). Designed for chat-style / long-form input use cases over a high
+/// latency mux connection. State lives on the mux server side so it survives
+/// client reconnects and stays consistent across multiple connected clients.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Default, Serialize, Deserialize)]
+pub enum InputMode {
+    #[default]
+    Direct,
+    Local,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PerformAssignmentResult {
     /// Continue search for handler
@@ -350,6 +368,40 @@ pub trait Pane: Downcast + Send + Sync {
 
     fn exit_behavior(&self) -> Option<ExitBehavior> {
         None
+    }
+
+    /// The pane's current input mode. See [`InputMode`].
+    fn input_mode(&self) -> InputMode {
+        InputMode::Direct
+    }
+
+    /// Set the pane's input mode. Implementations are expected to broadcast
+    /// the change to any subscribers (e.g. the mux server emits a unilateral
+    /// PDU so connected clients can update their cached state).
+    fn set_input_mode(&self, _mode: InputMode) {}
+
+    /// Render the GUI-side line editor's buffer into the pane's display
+    /// without touching the PTY. Called repeatedly whenever the buffer
+    /// changes while the pane is in [`InputMode::Local`].
+    ///
+    /// `anchor` is the cell coordinate where the editor's first character
+    /// should appear; `text` is the full buffer contents (may contain
+    /// embedded `\n`); `prev_lines_used` is the number of physical lines
+    /// the previous render of this editor occupied, so the implementation
+    /// can erase stale content.
+    ///
+    /// Returns the number of physical lines this render occupies, to be
+    /// fed back as `prev_lines_used` on the next call.
+    ///
+    /// The default implementation is a no-op so panes that don't need
+    /// local input echo (e.g. tmux passthrough) can ignore this.
+    fn render_local_input(
+        &self,
+        _anchor: StableCursorPosition,
+        _text: &str,
+        _prev_lines_used: usize,
+    ) -> usize {
+        0
     }
 }
 impl_downcast!(Pane);

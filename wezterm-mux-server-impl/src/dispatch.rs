@@ -221,6 +221,12 @@ fn handle_notification(
                 }),
             );
         }
+        MuxNotification::PaneInputModeChanged { pane_id, mode } => {
+            send_pdu(
+                write_tx,
+                Pdu::PaneInputModeChanged(codec::PaneInputModeChanged { pane_id, mode }),
+            );
+        }
         MuxNotification::PaneAdded(_) => {}
         MuxNotification::SaveToDownloads { .. } => {}
         MuxNotification::WindowRemoved(_) => {}

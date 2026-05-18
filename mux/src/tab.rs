@@ -278,6 +278,7 @@ fn pane_tree(
                 left_col,
                 top_row,
                 tty_name: pane.tty_name(),
+                input_mode: pane.input_mode(),
             })
         }
     }
@@ -2161,6 +2162,7 @@ pub struct PaneEntry {
     pub top_row: usize,
     pub left_col: usize,
     pub tty_name: Option<String>,
+    pub input_mode: crate::pane::InputMode,
 }
 
 #[derive(Deserialize, Clone, Serialize, PartialEq, Debug)]

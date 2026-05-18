@@ -267,6 +267,107 @@ impl RenderableInner {
         }
     }
 
+    /// Render the line editor's buffer into our cached line view starting
+    /// at `anchor`. Used to power Local input mode echo without sending
+    /// keystrokes to the remote server. `prev_lines_used` is the height
+    /// (in physical rows) of the previous render of this editor; cells in
+    /// those rows that fall outside the new render are erased so deletions
+    /// shrink the displayed text.
+    ///
+    /// Returns the height (in physical rows) of the new render.
+    pub fn render_local_input(
+        &mut self,
+        anchor: StableCursorPosition,
+        text: &str,
+        prev_lines_used: usize,
+    ) -> usize {
+        let cols = self.dimensions.cols.max(1);
+        let attrs = CellAttributes::default();
+
+        let prev_extent = prev_lines_used.max(1);
+        for offset in 0..prev_extent {
+            let row = anchor.y + offset as StableRowIndex;
+            self.clear_cells_for_local_input(row, if offset == 0 { anchor.x } else { 0 });
+        }
+
+        let mut row = anchor.y;
+        let mut col = anchor.x;
+        let mut lines_used: usize = 1;
+        for ch in text.chars() {
+            if ch == '\n' {
+                row += 1;
+                col = 0;
+                lines_used += 1;
+                continue;
+            }
+            let cell = Cell::new(ch, attrs.clone());
+            let width = cell.width().max(1);
+            if col + width > cols {
+                row += 1;
+                col = 0;
+                lines_used += 1;
+            }
+            self.write_cell_for_local_input(row, col, cell);
+            col += width;
+        }
+
+        lines_used
+    }
+
+    /// Clear cells from `start_col` onward on the cached line at `row`.
+    /// If the line is not cached we have nothing to do; the eventual
+    /// fetched line will override our edit anyway.
+    fn clear_cells_for_local_input(&mut self, row: StableRowIndex, start_col: usize) {
+        let entry = self.lines.pop(&row);
+        match entry {
+            Some(LineEntry::Line(mut line)) | Some(LineEntry::Stale(mut line)) => {
+                let len = line.len();
+                for col in start_col..len {
+                    line.erase_cell(col, SEQ_ZERO);
+                }
+                self.lines.put(row, LineEntry::Line(line));
+            }
+            Some(LineEntry::LineAndFetching(mut line, instant)) => {
+                let len = line.len();
+                for col in start_col..len {
+                    line.erase_cell(col, SEQ_ZERO);
+                }
+                self.lines
+                    .put(row, LineEntry::LineAndFetching(line, instant));
+            }
+            Some(other) => {
+                self.lines.put(row, other);
+            }
+            None => {}
+        }
+    }
+
+    /// Write a single cell at (row, col) on the cached line.
+    fn write_cell_for_local_input(&mut self, row: StableRowIndex, col: usize, cell: Cell) {
+        let entry = self.lines.pop(&row);
+        match entry {
+            Some(LineEntry::Line(mut line)) | Some(LineEntry::Stale(mut line)) => {
+                line.set_cell(col, cell, SEQ_ZERO);
+                self.lines.put(row, LineEntry::Line(line));
+            }
+            Some(LineEntry::LineAndFetching(mut line, instant)) => {
+                line.set_cell(col, cell, SEQ_ZERO);
+                self.lines
+                    .put(row, LineEntry::LineAndFetching(line, instant));
+            }
+            Some(LineEntry::Fetching(then)) => {
+                let mut line = Line::with_width(self.dimensions.cols.max(1), SEQ_ZERO);
+                line.set_cell(col, cell, SEQ_ZERO);
+                self.lines.put(row, LineEntry::LineAndFetching(line, then));
+            }
+            None => {
+                let mut line = Line::with_width(self.dimensions.cols.max(1), SEQ_ZERO);
+                line.set_cell(col, cell, SEQ_ZERO);
+                self.lines.put(row, LineEntry::Line(line));
+            }
+        }
+    }
+
     pub fn predict_from_paste(&mut self, text: &str) {
         if !self.should_predict() {
             return;
