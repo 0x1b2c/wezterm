@@ -95,6 +95,12 @@ impl crate::TermWindow {
                     .visual_cursor_offset(anchor.x, dims_for_cursor.cols);
                 cursor.y = anchor.y + row_offset;
                 cursor.x = col;
+                // Force visibility so the amber Local-mode cursor still
+                // shows in panes whose application has hidden the terminal
+                // cursor (DECSET 25), e.g. TUIs that draw their own input
+                // box. Without this, the cursor color override produces no
+                // visible indicator.
+                cursor.visibility = ::termwiz::surface::CursorVisibility::Visible;
             }
         }
         if pos.is_active {
