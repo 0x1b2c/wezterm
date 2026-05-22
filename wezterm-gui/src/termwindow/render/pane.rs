@@ -77,7 +77,26 @@ impl crate::TermWindow {
         let border = self.get_os_border();
         let top_pixel_y = top_bar_height + padding_top + border.top.get() as f32;
 
-        let cursor = pos.pane.get_cursor_position();
+        let mut cursor = pos.pane.get_cursor_position();
+        let in_local_input_mode = pos.pane.input_mode() == mux::pane::InputMode::Local;
+        if in_local_input_mode {
+            // The server-tracked cursor sits at the anchor (DECSC/DECRC in
+            // `LocalPane::render_local_input` keeps it pinned there so that
+            // on submit the buffered text lands at the original prompt
+            // position). For the displayed cursor we want the visual
+            // position of the LineEditor's edit cursor instead, walked
+            // through the buffer with the same wrap rules the cell render
+            // uses.
+            let dims_for_cursor = pos.pane.get_dimensions();
+            let state = self.pane_state(pos.pane.pane_id());
+            if let Some(anchor) = state.local_input.anchor() {
+                let (row_offset, col) = state
+                    .local_input
+                    .visual_cursor_offset(anchor.x, dims_for_cursor.cols);
+                cursor.y = anchor.y + row_offset;
+                cursor.x = col;
+            }
+        }
         if pos.is_active {
             self.prev_cursor.update(&cursor);
         }
@@ -298,7 +317,6 @@ impl crate::TermWindow {
         let selection_fg = palette.selection_fg.to_linear();
         let selection_bg = palette.selection_bg.to_linear();
         let cursor_fg = palette.cursor_fg.to_linear();
-        let in_local_input_mode = pos.pane.input_mode() == mux::pane::InputMode::Local;
         let cursor_bg = if in_local_input_mode {
             self.config.local_input_mode_cursor_bg.to_linear()
         } else {
