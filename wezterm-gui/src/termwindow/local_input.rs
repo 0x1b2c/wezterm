@@ -68,6 +68,37 @@ impl LineEditorState {
         self.anchor
     }
 
+    /// Compute the visual position of the edit cursor relative to the
+    /// anchor, walking `buffer[..cursor]` with the same line-break and
+    /// width rules that `LocalPane::render_local_input` uses when emitting
+    /// cells. The result is `(row_offset, col)` where `row_offset` counts
+    /// rows below the anchor (0 means the same row) and `col` is the
+    /// column on that row.
+    ///
+    /// `anchor_col` is the starting column on the first row (subsequent
+    /// rows always start at column 0). `cols` is the pane width in cells.
+    /// This is a pure function over `buffer`, `cursor`, and the two args,
+    /// so it is easy to test without standing up a pane.
+    pub fn visual_cursor_offset(&self, anchor_col: usize, cols: usize) -> (isize, usize) {
+        let cols = cols.max(1);
+        let mut row: isize = 0;
+        let mut col = anchor_col;
+        for &ch in &self.buffer[..self.cursor] {
+            if ch == '\n' {
+                row += 1;
+                col = 0;
+                continue;
+            }
+            let width = wezterm_term::unicode_column_width(&ch.to_string(), None).max(1);
+            if col + width > cols {
+                row += 1;
+                col = 0;
+            }
+            col += width;
+        }
+        (row, col)
+    }
+
     /// Capture the pane's current cursor as the anchor, if not already set.
     pub fn ensure_anchor(&mut self, pane: &Arc<dyn Pane>) {
         if self.anchor.is_none() {
@@ -318,70 +349,4 @@ impl LineEditorState {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn insert_and_backspace() {
-        let mut e = LineEditorState::default();
-        e.insert_char('h');
-        e.insert_char('i');
-        assert_eq!(e.buffer_text(), "hi");
-        assert_eq!(e.cursor(), 2);
-        e.delete_before_cursor();
-        assert_eq!(e.buffer_text(), "h");
-        assert_eq!(e.cursor(), 1);
-    }
-
-    #[test]
-    fn delete_word_before() {
-        let mut e = LineEditorState::default();
-        for c in "the quick fox".chars() {
-            e.insert_char(c);
-        }
-        e.delete_word_before_cursor();
-        assert_eq!(e.buffer_text(), "the quick ");
-        e.delete_word_before_cursor();
-        assert_eq!(e.buffer_text(), "the ");
-    }
-
-    #[test]
-    fn line_navigation_with_newlines() {
-        let mut e = LineEditorState::default();
-        for c in "first\nsecond\nthird".chars() {
-            e.insert_char(c);
-        }
-        // cursor at end, on third line at col 5
-        e.move_up();
-        // now on second line at col 5
-        assert_eq!(e.cursor(), "first\nsecon".len());
-        e.move_up();
-        // now on first line at col 5
-        assert_eq!(e.cursor(), "first".len());
-    }
-
-    #[test]
-    fn ctrl_a_ctrl_e_within_line() {
-        let mut e = LineEditorState::default();
-        for c in "abc\ndef".chars() {
-            e.insert_char(c);
-        }
-        e.move_to_line_start();
-        assert_eq!(e.cursor(), "abc\n".len());
-        e.move_to_line_end();
-        assert_eq!(e.cursor(), "abc\ndef".len());
-    }
-
-    #[test]
-    fn submit_produces_payload_with_trailing_newline() {
-        let mut e = LineEditorState::default();
-        for c in "hello".chars() {
-            e.insert_char(c);
-        }
-        match e.submit() {
-            LineEditorAction::Submit { payload } => assert_eq!(payload, "hello\n"),
-            other => panic!("unexpected action: {:?}", other),
-        }
-        assert!(e.is_idle());
-    }
-}
+mod tests;
