@@ -1,5 +1,11 @@
 # Wez's Terminal
 
+> **Personal fork by [0x1b2c](https://github.com/0x1b2c).** This fork carries
+> additional patches (mux deadlock fix, tab-title perf, per-pane local input
+> mode, window presets, and others) not yet merged upstream. See
+> [FORK.md](FORK.md) for the full changelist and build instructions. The rest of
+> this README is unchanged from upstream WezTerm.
+
 <img height="128" alt="WezTerm Icon" src="https://raw.githubusercontent.com/wezterm/wezterm/main/assets/icon/wezterm-icon.svg" align="left"> *A GPU-accelerated cross-platform terminal emulator and multiplexer written by <a href="https://github.com/wez">@wez</a> and implemented in <a href="https://www.rust-lang.org/">Rust</a>*
 
 User facing docs and guide at: https://wezterm.org/
