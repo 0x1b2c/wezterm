@@ -52,7 +52,7 @@ user-facing symptom, are listed by branch name in the final section.
 ### Declare window layouts once, spawn them on demand
 
 - **Setting up the same windows and tabs by hand every time is tedious.** This
-  fork adds window presets: declare window layouts in the config, then spawn
+  fork adds Window Presets: declare window layouts in the config, then spawn
   and kill them on demand via launcher flags, so a known-good working set is
   always one command away. Includes a `SpawnCommand` `send_text` field so a
   preset tab can auto-run a command in the default shell.
@@ -73,8 +73,8 @@ user-facing symptom, are listed by branch name in the final section.
   appears on screen.** This gets especially bad when the mux server runs on a
   Mac that has dozed off: macOS power management throttles the sleeping
   machine, and each round trip stretches from milliseconds to seconds. This
-  fork adds a per-pane Local input mode that buffers keystrokes client-side
-  and ships the line to the PTY only on submit. It is a convenience tool aimed
+  fork adds Local Input Mode, a per-pane input mode that buffers keystrokes
+  client-side and ships the line to the PTY only on submit. It is a convenience tool aimed
   at a minimally usable environment when the network is bad, not a perfect
   line editor. It is the newest patch in the stack, with known edge cases
   around paste and full key capture still open.

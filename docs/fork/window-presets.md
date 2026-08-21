@@ -1,4 +1,4 @@
-# Window presets
+# Window Presets
 
 Declare named, multi-tab window layouts in the config, then spawn and kill
 them on demand. The mux server materializes a whole preset in one action, so
@@ -17,7 +17,7 @@ window; the rest become additional tabs in order. The `send_text` field is a
 fork addition: it writes the given bytes to the pane's stdin right after
 spawn, which runs a command inside the default shell rather than replacing
 the shell via `args`; a trailing newline is required for the shell to execute
-the line. It is honored only by window preset materialization.
+the line. It is honored only by Window Presets materialization.
 
 Raw `SpawnCommand` tables get repetitive for presets with many tabs in the
 same project tree, so the author's actual config wraps them in a small Lua
