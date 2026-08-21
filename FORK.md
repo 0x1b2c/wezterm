@@ -54,9 +54,9 @@ user-facing symptom, are listed by branch name in the final section.
 - **Setting up the same windows and tabs by hand every time is tedious.** This
   fork adds window presets: declare window layouts in the config, then spawn
   and kill them on demand via launcher flags, so a known-good working set is
-  always one command away. Includes a `SpawnCommand` `text` field so a preset
-  tab can auto-run a command in the default shell.
-  *Branch: [window-presets](https://github.com/0x1b2c/wezterm/compare/session-experience...window-presets).*
+  always one command away. Includes a `SpawnCommand` `send_text` field so a
+  preset tab can auto-run a command in the default shell.
+  *Usage: [docs/fork/window-presets.md](docs/fork/window-presets.md). Branch: [window-presets](https://github.com/0x1b2c/wezterm/compare/session-experience...window-presets).*
 
 - **There is no keybinding action to close a whole mux window at once**, which
   resetting a layout needs. Added a Lua action that atomically kills a mux
@@ -78,7 +78,7 @@ user-facing symptom, are listed by branch name in the final section.
   at a minimally usable environment when the network is bad, not a perfect
   line editor. It is the newest patch in the stack, with known edge cases
   around paste and full key capture still open.
-  *Branch: [local-input](https://github.com/0x1b2c/wezterm/compare/window-presets...local-input).*
+  *Usage: [docs/fork/local-input.md](docs/fork/local-input.md). Branch: [local-input](https://github.com/0x1b2c/wezterm/compare/window-presets...local-input).*
 
 ### Failures should explain themselves
 
