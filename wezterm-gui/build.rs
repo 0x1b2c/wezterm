@@ -4,8 +4,6 @@ fn main() {
     #[cfg(windows)]
     {
         use anyhow::Context as _;
-        use std::io::Write;
-        use std::path::Path;
         let profile = std::env::var("PROFILE").unwrap();
         let repo_dir = std::env::current_dir()
             .ok()
@@ -61,6 +59,19 @@ fn main() {
                     .unwrap();
             }
         }
+    }
+
+    // Gate on the target rather than the host: this build script is compiled
+    // for the host, so `#[cfg(windows)]` would skip resource embedding when
+    // cross-compiling a Windows binary from another OS.
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
+        use std::io::Write;
+        use std::path::Path;
+        let repo_dir = std::env::current_dir()
+            .ok()
+            .and_then(|cwd| cwd.parent().map(|p| p.to_path_buf()))
+            .unwrap();
+        let windows_dir = repo_dir.join("assets").join("windows");
 
         // If a file named `.tag` is present, we'll take its contents for the
         // version number that we report in wezterm -h.
@@ -103,8 +114,8 @@ fn main() {
 #include <winres.h>
 // This ID is coupled with code in window/src/os/windows/window.rs
 #define IDI_ICON 0x101
-1 RT_MANIFEST "{win}\\manifest.manifest"
-IDI_ICON ICON "{win}\\terminal.ico"
+1 RT_MANIFEST "{win}{sep}manifest.manifest"
+IDI_ICON ICON "{win}{sep}terminal.ico"
 VS_VERSION_INFO VERSIONINFO
 FILEVERSION     1,0,0,0
 PRODUCTVERSION  1,0,0,0
@@ -135,6 +146,7 @@ BEGIN
 END
 "#,
             win = windows_dir.display().to_string().replace("\\", "\\\\"),
+            sep = RC_PATH_SEP,
             version = version,
         )
         .unwrap();
@@ -183,3 +195,10 @@ END
             .unwrap();
     }
 }
+
+// Path separator written into the generated .rc file. Windows hosts keep the
+// escaped backslash; other hosts (cross-compiling via windres) use a slash.
+#[cfg(windows)]
+const RC_PATH_SEP: &str = "\\\\";
+#[cfg(not(windows))]
+const RC_PATH_SEP: &str = "/";

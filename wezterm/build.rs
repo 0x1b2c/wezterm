@@ -1,8 +1,10 @@
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
 
-    #[cfg(windows)]
-    {
+    // Gate on the target rather than the host: this build script is compiled
+    // for the host, so `#[cfg(windows)]` would skip resource embedding when
+    // cross-compiling a Windows binary from another OS.
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
         use std::io::Write;
         use std::path::Path;
 
@@ -18,9 +20,10 @@ fn main() {
             rcfile,
             r#"
 #include <winres.h>
-1 RT_MANIFEST "{win}\\console.manifest"
+1 RT_MANIFEST "{win}{sep}console.manifest"
 "#,
             win = windows_dir.display().to_string().replace("\\", "\\\\"),
+            sep = RC_PATH_SEP,
         )
         .unwrap();
         drop(rcfile);
@@ -36,3 +39,10 @@ fn main() {
         embed_resource::compile(rcfile_name);
     }
 }
+
+// Path separator written into the generated .rc file. Windows hosts keep the
+// escaped backslash; other hosts (cross-compiling via windres) use a slash.
+#[cfg(windows)]
+const RC_PATH_SEP: &str = "\\\\";
+#[cfg(not(windows))]
+const RC_PATH_SEP: &str = "/";
