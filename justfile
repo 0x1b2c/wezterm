@@ -72,12 +72,30 @@ build-windows:
     cross build --release --target x86_64-pc-windows-gnu -p wezterm-gui -p wezterm -p wezterm-mux-server -p strip-ansi-escapes </dev/null
 
 # Assemble target/WezTerm-windows/ and zip it as target/WezTerm-windows.zip.
-bundle-windows: build-windows
+# Like any build tool, skip the (slow, container-based) build when the zip is
+# newer than every file tracked by git; `+force` rebuilds regardless.
+bundle-windows *flags="":
     #!/usr/bin/env bash
     set -euo pipefail
     SRC="target/x86_64-pc-windows-gnu/release"
     DEST="target/WezTerm-windows"
     ZIP="target/WezTerm-windows.zip"
+    force=false
+    for f in {{ flags }}; do
+        case "$f" in
+            +force) force=true ;;
+            *) echo "unknown flag: $f"; exit 1 ;;
+        esac
+    done
+    if [ "$force" = false ] && [ -f "$ZIP" ]; then
+        zip_mtime=$(stat -f %m "$ZIP")
+        newest=$(git ls-files -z | xargs -0 stat -f %m 2>/dev/null | sort -n | tail -1 || true)
+        if [ -n "$newest" ] && [ "$newest" -le "$zip_mtime" ]; then
+            echo "Up to date, reusing $ZIP (use +force to rebuild)"
+            exit 0
+        fi
+    fi
+    just build-windows
     rm -rf "$DEST" "$ZIP"
     mkdir -p "$DEST/mesa"
     for bin in wezterm-gui wezterm wezterm-mux-server strip-ansi-escapes; do
