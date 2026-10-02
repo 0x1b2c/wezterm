@@ -135,8 +135,9 @@ The commonly used build recipes:
 - `just build-linux`: static `x86_64-unknown-linux-musl` binaries (requires `cross` and Docker)
 - `just bundle-windows`: `x86_64-pc-windows-gnu` (MinGW) binaries packaged as `target/WezTerm-windows.zip` (requires `cross` installed from git and Docker; set `DOCKER_CONTEXT` to build on another Docker host, with `CROSS_REMOTE=1` when that host cannot see this checkout)
 
-The `deploy-*` recipes are specific to the author's own machines and install
-paths, and are not meant for general use.
+Machine-specific deploy recipes live in an uncommitted `justfile.local`, which
+the justfile imports when present; the repository carries only the generic
+build and bundle recipes.
 
 If you prefer to build without `just`, follow upstream's source build
 instructions at <https://wezterm.org/install/source.html>, building from this
