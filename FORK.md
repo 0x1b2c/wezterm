@@ -133,7 +133,7 @@ The commonly used build recipes:
 - `just bundle-arm64`: assemble `target/WezTerm.app` from the arm64 binaries
 - `just build-x86`: `x86_64-apple-darwin` release binaries
 - `just build-linux`: static `x86_64-unknown-linux-musl` binaries (requires `cross` and Docker)
-- `just bundle-windows`: `x86_64-pc-windows-gnu` (MinGW) binaries packaged as `target/WezTerm-windows.zip` (requires `cross` installed from git and Docker; set `DOCKER_CONTEXT` to build on another Docker host, with `CROSS_REMOTE=1` when that host cannot see this checkout)
+- `just bundle-windows`: `x86_64-pc-windows-gnu` (MinGW) binaries packaged as `target/WezTerm-windows.zip` (requires `cross` installed from git and Docker; export `WEZTERM_WINDOWS_DOCKER_CONTEXT` from `justfile.local` to build on another Docker host, with `WEZTERM_WINDOWS_CROSS_REMOTE=1` when that host cannot see this checkout)
 
 Machine-specific deploy recipes live in an uncommitted `justfile.local`, which
 the justfile imports when present; the repository carries only the generic
