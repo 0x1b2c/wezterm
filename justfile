@@ -55,7 +55,7 @@ bundle-arm64 profile="release": (build-arm64 profile)
     cp -r assets/shell-integration/* "$DEST/Contents/Resources/"
     cp -r assets/shell-completion "$DEST/Contents/Resources/"
     tic -xe wezterm -o "$DEST/Contents/Resources/terminfo" termwiz/data/wezterm.terminfo
-    codesign --force --deep --sign - "$DEST"
+    just _sign-mac "$DEST"
     echo "Built: $DEST"
 
 # Build target/WezTerm-x86.app from x86_64-apple-darwin release binaries.
@@ -74,8 +74,28 @@ bundle-x86: build-x86
     cp -r assets/shell-integration/* "$DEST/Contents/Resources/"
     cp -r assets/shell-completion "$DEST/Contents/Resources/"
     tic -xe wezterm -o "$DEST/Contents/Resources/terminfo" termwiz/data/wezterm.terminfo
-    codesign --force --deep --sign - "$DEST"
+    just _sign-mac "$DEST"
     echo "Built: $DEST"
+
+# Internal: ad-hoc sign a WezTerm.app with identifier-only designated
+# requirements. TCC binds privacy grants to the designated requirement; a
+# plain ad-hoc signature pins it to the binary's cdhash, which changes on every
+# rebuild and silently invalidates the grants. Naming only the identifier lets
+# every future build satisfy it. The nested executables are signed first so
+# the bundle can be sealed without --deep. See "Bundle identifier and signing"
+# in FORK.md.
+_sign-mac app:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    APP="{{ app }}"
+    for bin in wezterm wezterm-mux-server strip-ansi-escapes; do
+        exe="$APP/Contents/MacOS/$bin"
+        if [ -f "$exe" ]; then
+            codesign --force --sign - --identifier "org.1b2c.wezterm.$bin" \
+                -r="designated => identifier \"org.1b2c.wezterm.$bin\"" "$exe"
+        fi
+    done
+    codesign --force --sign - -r='designated => identifier "org.1b2c.wezterm"' "$APP"
 
 # Deploy native arm64 release to /Applications/WezTerm.app. Flags: `+mux`, `+full-bundle`.
 deploy-release *flags="":
@@ -116,7 +136,6 @@ _deploy-mac profile *flags="":
         if [ "$has_mux" = true ]; then
             killall wezterm-mux-server 2>/dev/null || true
         fi
-        codesign --force --deep --sign - /Applications/WezTerm.app
     else
         if [ "$has_mux" = true ]; then
             cargo build $CARGO_PROFILE_FLAG -p wezterm-gui -p wezterm -p wezterm-mux-server
@@ -124,13 +143,18 @@ _deploy-mac profile *flags="":
             cargo build $CARGO_PROFILE_FLAG -p wezterm-gui -p wezterm
         fi
         cp "$TARGET_DIR/wezterm-gui" "$APP/"
-        cp "$TARGET_DIR/wezterm" /opt/homebrew/bin/wezterm
+        cp "$TARGET_DIR/wezterm" "$APP/"
         if [ "$has_mux" = true ]; then
             killall wezterm-mux-server 2>/dev/null || true
             cp "$TARGET_DIR/wezterm-mux-server" "$APP/"
-            cp "$TARGET_DIR/wezterm-mux-server" /opt/homebrew/bin/wezterm-mux-server
         fi
-        codesign --force --deep --sign - /Applications/WezTerm.app
+        just _sign-mac /Applications/WezTerm.app
+        # Copy the CLI tools out of the signed bundle so they carry the same
+        # identifier-based signature as their in-bundle counterparts.
+        cp "$APP/wezterm" /opt/homebrew/bin/wezterm
+        if [ "$has_mux" = true ]; then
+            cp "$APP/wezterm-mux-server" /opt/homebrew/bin/wezterm-mux-server
+        fi
     fi
     echo "Deployed (profile={{ profile }}, mux=$has_mux, full-bundle=$has_full)"
 
@@ -141,7 +165,7 @@ deploy-a2: bundle-x86
     ARCHIVE="target/wezterm-x86_64.tar.zst"
     tar -C target -cf - WezTerm-x86.app/ | zstd -T0 -f -o "$ARCHIVE"
     scp "$ARCHIVE" a2:/tmp/
-    ssh a2 'export PATH="/usr/local/bin:$PATH" && cd /tmp && tar --use-compress-program=unzstd -xf wezterm-x86_64.tar.zst && rsync -a --delete WezTerm-x86.app/ /Applications/WezTerm.app/ && codesign --force --deep --sign - /Applications/WezTerm.app && rm -rf WezTerm-x86.app wezterm-x86_64.tar.zst'
+    ssh a2 'export PATH="/usr/local/bin:$PATH" && cd /tmp && tar --use-compress-program=unzstd -xf wezterm-x86_64.tar.zst && rsync -a --delete WezTerm-x86.app/ /Applications/WezTerm.app/ && rm -rf WezTerm-x86.app wezterm-x86_64.tar.zst'
     echo "Deployed to a2"
 
 # Deploy the linux CLI + mux-server to host `archer` under /usr/local/bin.
