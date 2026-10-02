@@ -141,6 +141,27 @@ If you prefer to build without `just`, follow upstream's source build
 instructions at <https://wezterm.org/install/source.html>, building from this
 fork's `master` branch instead of upstream `main`.
 
+### Bundle identifier and signing
+
+macOS builds of this fork use the bundle identifier `org.1b2c.wezterm`, not
+upstream's `com.github.wez.wezterm`. The reason is privacy permissions. These
+builds are ad-hoc signed, without a developer certificate, and macOS binds
+privacy grants (Accessibility, Full Disk Access, and the like) to the app's
+designated requirement. A plain ad-hoc signature ties that requirement to the
+binary's hash, so every rebuild would lose its grants; the recipes instead sign
+with a requirement that names only the bundle identifier, which every future
+build satisfies.
+
+macOS keeps one permission record per bundle identifier. If this fork reused
+upstream's identifier, official builds and fork builds would compete for that
+single record: granting a permission to one would replace the other's, and
+switching between them would keep asking for the grants again. A distinct
+identifier keeps the two builds' permissions separate. (A shared identifier
+would also let official builds satisfy the fork's requirement, since that
+requirement names only the identifier.) This is not a claim of authorship:
+the app name, copyright notices, and license are unchanged, and WezTerm
+remains Wez Furlong's work.
+
 ## License and attribution
 
 The license is unchanged from upstream WezTerm. All upstream copyright and
