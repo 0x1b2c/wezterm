@@ -282,3 +282,7 @@ zvariant = "4.0"
 # We use our own vendored cairo, which has minimal deps and should just
 # build via cargo.
 cairo-sys-rs = {path="deps/cairo", version="0.18.0"}
+# libssh-rs-sys links OpenSSL by its MSVC library names on every Windows
+# target, so windows-gnu (MinGW) builds fail to link. This fork commit links
+# the MinGW names on windows-gnu; drop the patch once upstream libssh-rs does.
+libssh-rs-sys = {git="https://github.com/0x1b2c/libssh-rs", rev="fb54440ab1c3886d17f319fceb49432681cb03c3"}
