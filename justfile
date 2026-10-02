@@ -66,7 +66,10 @@ build-windows:
     # and stripping at link time avoids needing a Windows strip tool on the host.
     export RUSTC_WRAPPER= CARGO_BUILD_RUSTC_WRAPPER= CARGO_PROFILE_RELEASE_STRIP=symbols
     export CROSS_CONTAINER_OPTS="${CROSS_CONTAINER_OPTS:-} -e RUSTC_WRAPPER= -e CARGO_BUILD_RUSTC_WRAPPER= -e CARGO_PROFILE_RELEASE_STRIP=symbols"
-    cross build --release --target x86_64-pc-windows-gnu -p wezterm-gui -p wezterm -p wezterm-mux-server -p strip-ansi-escapes
+    # With a terminal on stdin cross requests an interactive exec, which a Docker
+    # daemon reached over an ssh context rejects with "received 409". The build
+    # reads no input, so detach stdin; output still goes to the terminal.
+    cross build --release --target x86_64-pc-windows-gnu -p wezterm-gui -p wezterm -p wezterm-mux-server -p strip-ansi-escapes </dev/null
 
 # Assemble target/WezTerm-windows/ and zip it as target/WezTerm-windows.zip.
 bundle-windows: build-windows
