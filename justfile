@@ -35,12 +35,19 @@ build-linux:
     strip target/x86_64-unknown-linux-musl/release/wezterm 2>/dev/null || true
     strip target/x86_64-unknown-linux-musl/release/wezterm-mux-server 2>/dev/null || true
 
-# The Docker daemon comes from the caller's environment: set DOCKER_CONTEXT to build
-# on another host, and CROSS_REMOTE=1 when that daemon cannot see this checkout's files.
+# The Docker daemon comes from WEZTERM_WINDOWS_DOCKER_CONTEXT (build on another host) and
+# WEZTERM_WINDOWS_CROSS_REMOTE=1 (that daemon cannot see this checkout's files), meant to be
+# exported from justfile.local; when unset, DOCKER_CONTEXT/CROSS_REMOTE are inherited as is.
 # Cross-build Windows binaries for x86_64-pc-windows-gnu (MinGW).
 build-windows:
     #!/usr/bin/env bash
     set -euo pipefail
+    if [ -n "${WEZTERM_WINDOWS_DOCKER_CONTEXT:-}" ]; then
+        export DOCKER_CONTEXT="$WEZTERM_WINDOWS_DOCKER_CONTEXT"
+    fi
+    if [ -n "${WEZTERM_WINDOWS_CROSS_REMOTE:-}" ]; then
+        export CROSS_REMOTE="$WEZTERM_WINDOWS_CROSS_REMOTE"
+    fi
     if ! command -v cross >/dev/null 2>&1; then
         echo "Error: 'cross' not found. Install with: cargo install cross --git https://github.com/cross-rs/cross"
         exit 1
