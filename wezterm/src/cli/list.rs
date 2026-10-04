@@ -17,31 +17,7 @@ impl ListCommand {
     pub async fn run(&self, client: Client) -> anyhow::Result<()> {
         let out = std::io::stdout();
 
-        let mut output_items = vec![];
-        let panes = client.list_panes().await?;
-
-        for (tabroot, tab_title) in panes.tabs.into_iter().zip(panes.tab_titles.iter()) {
-            let mut cursor = tabroot.into_tree().cursor();
-
-            loop {
-                if let Some(entry) = cursor.leaf_mut() {
-                    let window_title = panes
-                        .window_titles
-                        .get(&entry.window_id)
-                        .map(|s| s.as_str())
-                        .unwrap_or("");
-                    output_items.push(CliListResultItem::from(
-                        entry.clone(),
-                        tab_title,
-                        window_title,
-                    ));
-                }
-                match cursor.preorder_next() {
-                    Ok(c) => cursor = c,
-                    Err(_) => break,
-                }
-            }
-        }
+        let output_items = result_items(client.list_panes().await?);
         match self.format {
             CliOutputFormatKind::Json => {
                 let mut writer = serde_json::Serializer::pretty(out.lock());
@@ -99,6 +75,37 @@ impl ListCommand {
     }
 }
 
+/// Flatten the pane trees of a `ListPanes` response into one output item
+/// per pane.
+fn result_items(panes: codec::ListPanesResponse) -> Vec<CliListResultItem> {
+    let mut output_items = vec![];
+    for (tabroot, tab_title) in panes.tabs.into_iter().zip(panes.tab_titles.iter()) {
+        let mut cursor = tabroot.into_tree().cursor();
+
+        loop {
+            if let Some(entry) = cursor.leaf_mut() {
+                let window_title = panes
+                    .window_titles
+                    .get(&entry.window_id)
+                    .map(|s| s.as_str())
+                    .unwrap_or("");
+                let window_preset = panes.window_presets.get(&entry.window_id).cloned();
+                output_items.push(CliListResultItem::from(
+                    entry.clone(),
+                    tab_title,
+                    window_title,
+                    window_preset,
+                ));
+            }
+            match cursor.preorder_next() {
+                Ok(c) => cursor = c,
+                Err(_) => break,
+            }
+        }
+    }
+    output_items
+}
+
 #[derive(serde::Serialize)]
 struct CliListResultPtySize {
     rows: usize,
@@ -136,13 +143,20 @@ struct CliListResultItem {
     top_row: usize,
     tab_title: String,
     window_title: String,
+    /// Name of the window preset that opened the window, if any
+    window_preset: Option<String>,
     is_active: bool,
     is_zoomed: bool,
     tty_name: Option<String>,
 }
 
 impl CliListResultItem {
-    fn from(pane: mux::tab::PaneEntry, tab_title: &str, window_title: &str) -> CliListResultItem {
+    fn from(
+        pane: mux::tab::PaneEntry,
+        tab_title: &str,
+        window_title: &str,
+        window_preset: Option<String>,
+    ) -> CliListResultItem {
         let mux::tab::PaneEntry {
             window_id,
             tab_id,
@@ -194,9 +208,59 @@ impl CliListResultItem {
             top_row,
             tab_title: tab_title.to_string(),
             window_title: window_title.to_string(),
+            window_preset,
             is_active: is_active_pane,
             is_zoomed: is_zoomed_pane,
             tty_name,
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use codec::ListPanesResponse;
+    use mux::tab::{PaneEntry, PaneNode};
+    use std::collections::HashMap;
+
+    fn pane(window_id: mux::window::WindowId, pane_id: mux::pane::PaneId) -> PaneNode {
+        PaneNode::Leaf(PaneEntry {
+            window_id,
+            tab_id: pane_id,
+            pane_id,
+            title: "zsh".to_string(),
+            size: TerminalSize::default(),
+            working_dir: None,
+            is_active_pane: true,
+            is_zoomed_pane: false,
+            workspace: "default".to_string(),
+            cursor_pos: Default::default(),
+            physical_top: 0,
+            top_row: 0,
+            left_col: 0,
+            tty_name: None,
+            input_mode: Default::default(),
+        })
+    }
+
+    #[test]
+    fn wid_004_the_pane_list_reports_which_preset_each_window_belongs_to() {
+        let mut window_presets = HashMap::new();
+        window_presets.insert(1, "control_center".to_string());
+        let panes = ListPanesResponse {
+            tabs: vec![pane(1, 10), pane(1, 11), pane(2, 20)],
+            tab_titles: vec!["a".to_string(), "b".to_string(), "c".to_string()],
+            window_titles: HashMap::new(),
+            window_presets,
+        };
+
+        let json: Vec<serde_json::Value> = result_items(panes)
+            .iter()
+            .map(|item| serde_json::to_value(item).unwrap())
+            .collect();
+
+        assert_eq!(json[0]["window_preset"], "control_center");
+        assert_eq!(json[1]["window_preset"], "control_center");
+        assert_eq!(json[2]["window_preset"], serde_json::Value::Null);
     }
 }

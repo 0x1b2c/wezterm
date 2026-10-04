@@ -666,6 +666,9 @@ pub struct ListPanesResponse {
     pub tabs: Vec<PaneNode>,
     pub tab_titles: Vec<String>,
     pub window_titles: HashMap<WindowId, String>,
+    /// The window preset that opened each window; windows not opened from
+    /// a preset are absent.
+    pub window_presets: HashMap<WindowId, String>,
 }
 
 #[derive(Deserialize, Serialize, PartialEq, Debug)]
@@ -1222,6 +1225,29 @@ mod test {
             assert_eq!(decoded.data, payload);
             serial += 1;
         }
+    }
+
+    #[test]
+    fn wid_004_the_pane_list_carries_each_windows_preset_across_the_wire() {
+        let mut window_presets = HashMap::new();
+        window_presets.insert(3, "control_center".to_string());
+        let response = Pdu::ListPanesResponse(ListPanesResponse {
+            tabs: vec![],
+            tab_titles: vec![],
+            window_titles: HashMap::new(),
+            window_presets,
+        });
+
+        let mut encoded = Vec::new();
+        response.encode(&mut encoded, 0x40).unwrap();
+
+        assert_eq!(
+            Pdu::decode(encoded.as_slice()).unwrap(),
+            DecodedPdu {
+                serial: 0x40,
+                pdu: response,
+            }
+        );
     }
 
     #[test]

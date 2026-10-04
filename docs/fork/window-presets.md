@@ -114,6 +114,10 @@ The marker lives on the mux server, which is how presets are discovered
 across clients: materialize a preset from one machine and another attached
 client sees it as running.
 
+External tools can read the marker too: `wezterm cli list --format json`
+reports a `window_preset` field for every pane, holding the name of the
+preset that opened the pane's window, or `null` otherwise.
+
 The `WINDOW_PRESETS` flag also composes with the general-purpose launcher;
 the author's `Cmd+Shift+L` binding uses
 `{ flags = 'FUZZY|WINDOW_PRESETS|DOMAINS' }` so presets, domains, and the
