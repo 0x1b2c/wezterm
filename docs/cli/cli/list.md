@@ -39,10 +39,19 @@ $ wezterm cli list --format json
       "cols": 80
     },
     "title": "wezterm cli list --format json -- wez@foo:~",
-    "cwd": "file://foo/home/wez/"
+    "cwd": "file://foo/home/wez/",
+    "window_preset": null
   }
 ]
 ```
+
+{{since('nightly')}}
+
+The JSON output includes `window_preset`: the name of the
+[window preset](../../config/lua/config/window_presets.md) that opened the
+window containing the pane, or `null` when the window was not opened from a
+preset. Unlike `window_title`, programs running in the window cannot change
+it, so external tools can rely on it to find a preset's window.
 
 ## Synopsis
 

@@ -17,31 +17,7 @@ impl ListCommand {
     pub async fn run(&self, client: Client) -> anyhow::Result<()> {
         let out = std::io::stdout();
 
-        let mut output_items = vec![];
-        let panes = client.list_panes().await?;
-
-        for (tabroot, tab_title) in panes.tabs.into_iter().zip(panes.tab_titles.iter()) {
-            let mut cursor = tabroot.into_tree().cursor();
-
-            loop {
-                if let Some(entry) = cursor.leaf_mut() {
-                    let window_title = panes
-                        .window_titles
-                        .get(&entry.window_id)
-                        .map(|s| s.as_str())
-                        .unwrap_or("");
-                    output_items.push(CliListResultItem::from(
-                        entry.clone(),
-                        tab_title,
-                        window_title,
-                    ));
-                }
-                match cursor.preorder_next() {
-                    Ok(c) => cursor = c,
-                    Err(_) => break,
-                }
-            }
-        }
+        let output_items = result_items(client.list_panes().await?);
         match self.format {
             CliOutputFormatKind::Json => {
                 let mut writer = serde_json::Serializer::pretty(out.lock());
@@ -99,6 +75,37 @@ impl ListCommand {
     }
 }
 
+/// Flatten the pane trees of a `ListPanes` response into one output item
+/// per pane.
+fn result_items(panes: codec::ListPanesResponse) -> Vec<CliListResultItem> {
+    let mut output_items = vec![];
+    for (tabroot, tab_title) in panes.tabs.into_iter().zip(panes.tab_titles.iter()) {
+        let mut cursor = tabroot.into_tree().cursor();
+
+        loop {
+            if let Some(entry) = cursor.leaf_mut() {
+                let window_title = panes
+                    .window_titles
+                    .get(&entry.window_id)
+                    .map(|s| s.as_str())
+                    .unwrap_or("");
+                let window_preset = panes.window_presets.get(&entry.window_id).cloned();
+                output_items.push(CliListResultItem::from(
+                    entry.clone(),
+                    tab_title,
+                    window_title,
+                    window_preset,
+                ));
+            }
+            match cursor.preorder_next() {
+                Ok(c) => cursor = c,
+                Err(_) => break,
+            }
+        }
+    }
+    output_items
+}
+
 #[derive(serde::Serialize)]
 struct CliListResultPtySize {
     rows: usize,
@@ -136,13 +143,20 @@ struct CliListResultItem {
     top_row: usize,
     tab_title: String,
     window_title: String,
+    /// Name of the window preset that opened the window, if any
+    window_preset: Option<String>,
     is_active: bool,
     is_zoomed: bool,
     tty_name: Option<String>,
 }
 
 impl CliListResultItem {
-    fn from(pane: mux::tab::PaneEntry, tab_title: &str, window_title: &str) -> CliListResultItem {
+    fn from(
+        pane: mux::tab::PaneEntry,
+        tab_title: &str,
+        window_title: &str,
+        window_preset: Option<String>,
+    ) -> CliListResultItem {
         let mux::tab::PaneEntry {
             window_id,
             tab_id,
@@ -194,9 +208,13 @@ impl CliListResultItem {
             top_row,
             tab_title: tab_title.to_string(),
             window_title: window_title.to_string(),
+            window_preset,
             is_active: is_active_pane,
             is_zoomed: is_zoomed_pane,
             tty_name,
         }
     }
 }
+
+#[cfg(test)]
+mod tests;
