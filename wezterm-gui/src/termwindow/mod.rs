@@ -87,7 +87,7 @@ pub mod webgpu;
 mod window_title;
 use crate::spawn::SpawnWhere;
 use prevcursor::PrevCursorPos;
-use window_title::{compute_window_title, initial_window_title};
+use window_title::{compute_window_title, initial_window_title, LastWindowTitle};
 
 const ATLAS_SIZE: usize = 128;
 
@@ -128,6 +128,7 @@ pub enum TermWindowNotif {
     SetLeftStatus(String),
     SetRightStatus(String),
     GetDimensions(Sender<(Dimensions, WindowState)>),
+    GetTitle(Sender<String>),
     GetSelectionForPane {
         pane_id: PaneId,
         tx: Sender<String>,
@@ -386,6 +387,8 @@ pub struct TermWindow {
     /// Terminal dimensions
     terminal_size: TerminalSize,
     pub mux_window_id: MuxWindowId,
+    /// The title most recently handed to the operating system
+    window_title: LastWindowTitle,
     pub mux_window_id_for_subscriptions: Arc<Mutex<MuxWindowId>>,
     /// `true` when the mux subscription must be unsubscribed from.
     /// This is done asynchronously to avoid races between mux events.
@@ -687,6 +690,12 @@ impl TermWindow {
 
         let connection_name = Connection::get().unwrap().name();
 
+        let initial_title = initial_window_title(
+            mux.get_window(mux_window_id)
+                .and_then(|window| window.get_preset().map(str::to_string))
+                .as_deref(),
+        );
+
         let myself = Self {
             created: Instant::now(),
             connection_name,
@@ -705,6 +714,7 @@ impl TermWindow {
             palette: None,
             focused: None,
             mux_window_id,
+            window_title: LastWindowTitle::new(initial_title.clone()),
             mux_window_id_for_subscriptions: Arc::new(Mutex::new(mux_window_id)),
             mux_subscription_dead: Arc::new(AtomicBool::new(false)),
             fonts: Rc::clone(&fontconfig),
@@ -827,11 +837,6 @@ impl TermWindow {
         };
         log::trace!("{:?}", geometry);
 
-        let initial_title = initial_window_title(
-            mux.get_window(mux_window_id)
-                .and_then(|window| window.get_preset().map(str::to_string))
-                .as_deref(),
-        );
         let window = Window::new_window(
             &get_window_class(),
             &initial_title,
@@ -1184,6 +1189,11 @@ impl TermWindow {
                 tx.try_send((self.dimensions, self.window_state))
                     .map_err(chan_err)
                     .context("send GetDimensions response")?;
+            }
+            TermWindowNotif::GetTitle(tx) => {
+                tx.try_send(self.window_title.get().to_string())
+                    .map_err(chan_err)
+                    .context("send GetTitle response")?;
             }
             TermWindowNotif::GetEffectiveConfig(tx) => {
                 tx.try_send(self.config.clone())
@@ -2077,7 +2087,7 @@ impl TermWindow {
         );
 
         if let Some(window) = self.window.as_ref() {
-            window.set_title(&title);
+            window.set_title(self.window_title.record(title));
 
             let show_tab_bar = if tabs_count == 1 {
                 self.config.enable_tab_bar && !self.config.hide_tab_bar_if_only_one_tab

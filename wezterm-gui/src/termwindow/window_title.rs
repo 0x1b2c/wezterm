@@ -34,6 +34,27 @@ pub fn compute_window_title(
     }
 }
 
+/// Remembers the title most recently handed to the operating system, which
+/// is what `window:get_title()` reports to Lua.
+#[derive(Debug, Clone, Default)]
+pub struct LastWindowTitle(String);
+
+impl LastWindowTitle {
+    pub fn new(initial: String) -> Self {
+        Self(initial)
+    }
+
+    /// Record `title` and return it, ready to hand to the operating system.
+    pub fn record(&mut self, title: String) -> &str {
+        self.0 = title;
+        &self.0
+    }
+
+    pub fn get(&self) -> &str {
+        &self.0
+    }
+}
+
 fn preset_prefix(preset: &str) -> String {
     format!("[{}] ", preset)
 }
@@ -169,6 +190,20 @@ mod test {
         let tab = tab(0, &pane);
         let title = compute_window_title(None, mirror.get_preset(), Some(&tab), Some(&pane), 2);
         assert!(title.starts_with("[control_center] "), "{title}");
+    }
+
+    #[test]
+    fn wid_009_the_recorded_title_is_the_one_handed_to_the_system() {
+        let pane = pane("✳ Claude Code", false);
+        let tab = tab(1, &pane);
+        let mut last = LastWindowTitle::new(initial_window_title(Some("control_center")));
+        assert_eq!(last.get(), "[control_center]");
+
+        let title = compute_window_title(None, Some("control_center"), Some(&tab), Some(&pane), 5);
+        let handed_to_system = last.record(title).to_string();
+
+        assert_eq!(handed_to_system, "[control_center] [2/5] ✳ Claude Code");
+        assert_eq!(last.get(), handed_to_system);
     }
 
     #[test]
