@@ -13,12 +13,13 @@ single atomic unit by the mux server.
 Each entry is keyed by a preset name and contains a list of
 [SpawnCommand](../SpawnCommand.md) entries — one per tab. The first entry
 creates the window itself; subsequent entries are added as additional tabs in
-the order given. The map key doubles as the materialized window's title, so
-the preset can be discovered by title afterwards.
+the order given. The window a preset opens carries the preset name as a
+marker for its whole life; programs that change the window title do not
+affect it.
 
-A preset is "running" when a window whose title equals the preset name is
-present in the mux. Materializing a preset that is already running is a no-op,
-which keeps repeated invocations idempotent.
+A preset is "running" when a window carrying its marker is present in the
+mux. Materializing a preset that is already running is a no-op, which keeps
+repeated invocations idempotent.
 
 Presets can be:
 

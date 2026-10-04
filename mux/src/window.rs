@@ -14,11 +14,25 @@ pub struct Window {
     workspace: String,
     title: String,
     initial_position: Option<GuiPosition>,
+    /// Name of the window preset that opened this window, if any. Unlike
+    /// the title, nothing rewrites it once the window exists.
+    preset: Option<String>,
 }
 
 impl Window {
     /// Create a new Window.
     pub fn new(workspace: Option<String>, initial_position: Option<GuiPosition>) -> Self {
+        Self::new_with_preset(workspace, initial_position, None)
+    }
+
+    /// Create a new Window that carries the name of the window preset
+    /// opening it. The preset is fixed at construction so that the window
+    /// never exists without it.
+    pub fn new_with_preset(
+        workspace: Option<String>,
+        initial_position: Option<GuiPosition>,
+        preset: Option<String>,
+    ) -> Self {
         Self {
             id: WIN_ID.fetch_add(1, ::std::sync::atomic::Ordering::Relaxed),
             tabs: vec![],
@@ -27,7 +41,13 @@ impl Window {
             title: String::new(),
             workspace: workspace.unwrap_or_else(|| Mux::get().active_workspace()),
             initial_position,
+            preset,
         }
+    }
+
+    /// Return the name of the window preset that opened this window.
+    pub fn get_preset(&self) -> Option<&str> {
+        self.preset.as_deref()
     }
 
     /// Return initial position of the window.

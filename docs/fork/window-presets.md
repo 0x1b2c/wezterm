@@ -106,10 +106,13 @@ table.insert(config.keys, {
 * `WINDOW_PRESETS_KILL` lists only the running presets. Selecting one closes
   that window atomically, including all of its tabs.
 
-A preset counts as "running" when a mux window whose title equals the preset
-name exists. The preset name doubles as the window title, which is how
-presets are discovered across clients: materialize a preset from one machine
-and another attached client sees it as running.
+A preset counts as "running" when a mux window carrying its marker exists.
+The window a preset opens carries the preset name as a marker for its whole
+life, set when the window is created; the window title plays no part, so a
+program in the window retitling it does not make the preset look closed.
+The marker lives on the mux server, which is how presets are discovered
+across clients: materialize a preset from one machine and another attached
+client sees it as running.
 
 The `WINDOW_PRESETS` flag also composes with the general-purpose launcher;
 the author's `Cmd+Shift+L` binding uses
@@ -159,9 +162,9 @@ there are deliberately no per-preset key assignments.
 
 ## Notes and caveats
 
-* Preset discovery is title-based. Renaming a materialized window breaks the
-  association, and a preset named identically to an unrelated window's title
-  will be considered running.
+* Renaming or removing a preset in the config while its window is open
+  orphans that window: the launcher no longer recognizes it, so selecting the
+  new name opens a second window, and the old one can only be closed by hand.
 * Two clients materializing the same closed preset at nearly the same moment
   can race past the idempotency check and produce two windows. The window
   for this race is narrow and it has not been observed in practice.

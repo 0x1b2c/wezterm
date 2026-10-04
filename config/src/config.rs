@@ -740,8 +740,8 @@ pub struct Config {
 
     /// Named multi-tab window templates that can be materialized as a single
     /// atomic unit. Each value describes the tabs that compose the window;
-    /// the map key is used both as the preset name and as the window title
-    /// applied when the preset is materialized.
+    /// the map key is the preset name, which the materialized window carries
+    /// as its preset marker.
     #[dynamic(default)]
     pub window_presets: HashMap<String, WindowPreset>,
 
