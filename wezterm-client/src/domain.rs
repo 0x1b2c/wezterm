@@ -652,6 +652,12 @@ impl ClientDomain {
                             remote_window_id,
                             local_window_id,
                         );
+                        if let Some(mut window) = mux.get_window_mut(local_window_id) {
+                            window.set_preset_from_server(preset_of_remote_window(
+                                &panes.window_presets,
+                                remote_window_id,
+                            ));
+                        }
                         mux.add_tab_to_window(&tab, local_window_id)?;
                         primary_window_id.take();
                         continue;
@@ -663,7 +669,11 @@ impl ClientDomain {
                     workspace
                 );
                 let position = None;
-                let local_window_id = mux.new_empty_window(workspace.take(), position);
+                let local_window_id = mux.new_empty_window_with_preset(
+                    workspace.take(),
+                    position,
+                    preset_of_remote_window(&panes.window_presets, remote_window_id),
+                );
                 inner.record_remote_to_local_window_mapping(remote_window_id, *local_window_id);
                 mux.add_tab_to_window(&tab, *local_window_id)?;
             }
@@ -1005,5 +1015,42 @@ impl Domain for ClientDomain {
         } else {
             DomainState::Detached
         }
+    }
+}
+
+/// The window preset the mux server reports for `remote_window_id`. A local
+/// mirror window takes its preset from here and from nowhere else.
+fn preset_of_remote_window(
+    window_presets: &HashMap<WindowId, String>,
+    remote_window_id: WindowId,
+) -> Option<String> {
+    window_presets.get(&remote_window_id).cloned()
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use mux::window::Window;
+
+    fn presets() -> HashMap<WindowId, String> {
+        let mut presets = HashMap::new();
+        presets.insert(7, "control_center".to_string());
+        presets
+    }
+
+    #[test]
+    fn wid_005_a_mirror_window_takes_the_preset_the_server_reports() {
+        assert_eq!(
+            preset_of_remote_window(&presets(), 7).as_deref(),
+            Some("control_center")
+        );
+        assert_eq!(preset_of_remote_window(&presets(), 8), None);
+    }
+
+    #[test]
+    fn wid_005_the_primary_window_adopts_the_preset_of_the_remote_window_merged_into_it() {
+        let mut primary = Window::new(Some("default".to_string()), None);
+        primary.set_preset_from_server(preset_of_remote_window(&presets(), 7));
+        assert_eq!(primary.get_preset(), Some("control_center"));
     }
 }
