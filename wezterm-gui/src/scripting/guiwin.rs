@@ -106,6 +106,14 @@ impl UserData for GuiWin {
             this.window.notify(TermWindowNotif::SetLeftStatus(status));
             Ok(())
         });
+        methods.add_async_method("get_title", |_, this, _: ()| async move {
+            let (tx, rx) = smol::channel::bounded(1);
+            this.window.notify(TermWindowNotif::GetTitle(tx));
+            rx.recv()
+                .await
+                .map_err(|e| anyhow::anyhow!("{:#}", e))
+                .map_err(luaerr)
+        });
         methods.add_async_method("get_dimensions", |_, this, _: ()| async move {
             let (tx, rx) = smol::channel::bounded(1);
             this.window.notify(TermWindowNotif::GetDimensions(tx));
