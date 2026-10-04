@@ -84,8 +84,10 @@ pub mod resize;
 mod selection;
 pub mod spawn;
 pub mod webgpu;
+mod window_title;
 use crate::spawn::SpawnWhere;
 use prevcursor::PrevCursorPos;
+use window_title::{compute_window_title, initial_window_title};
 
 const ATLAS_SIZE: usize = 128;
 
@@ -825,9 +827,14 @@ impl TermWindow {
         };
         log::trace!("{:?}", geometry);
 
+        let initial_title = initial_window_title(
+            mux.get_window(mux_window_id)
+                .and_then(|window| window.get_preset().map(str::to_string))
+                .as_deref(),
+        );
         let window = Window::new_window(
             &get_window_class(),
-            "wezterm",
+            &initial_title,
             geometry,
             Some(&config),
             Rc::clone(&fontconfig),
@@ -2025,6 +2032,7 @@ impl TermWindow {
         if tabs_count == 0 {
             return;
         }
+        let preset = window.get_preset().map(str::to_string);
         drop(window);
 
         let title = match config::run_immediate_with_lua_config(|lua| {
@@ -2060,26 +2068,13 @@ impl TermWindow {
             }
         };
 
-        let title = match title {
-            Some(title) => title,
-            None => {
-                if let (Some(pos), Some(tab)) = (active_pane, active_tab) {
-                    if tabs_count == 1 {
-                        format!("{}{}", if pos.is_zoomed { "[Z] " } else { "" }, pos.title)
-                    } else {
-                        format!(
-                            "{}[{}/{}] {}",
-                            if pos.is_zoomed { "[Z] " } else { "" },
-                            tab.tab_index + 1,
-                            tabs_count,
-                            pos.title
-                        )
-                    }
-                } else {
-                    "".to_string()
-                }
-            }
-        };
+        let title = compute_window_title(
+            title,
+            preset.as_deref(),
+            active_tab.as_ref(),
+            active_pane.as_ref(),
+            tabs_count,
+        );
 
         if let Some(window) = self.window.as_ref() {
             window.set_title(&title);
