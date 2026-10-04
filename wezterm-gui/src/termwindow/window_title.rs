@@ -189,7 +189,7 @@ mod test {
         let pane = pane("zsh", false);
         let tab = tab(0, &pane);
         let title = compute_window_title(None, mirror.get_preset(), Some(&tab), Some(&pane), 2);
-        assert!(title.starts_with("[control_center] "), "{title}");
+        assert!(title.starts_with("[control_center] "), "{}", title);
     }
 
     #[test]
