@@ -45,6 +45,11 @@ The parameters to the event are:
 The return value of the event should be a string, and if it is then it will be
 used as the title text in the window title bar.
 
+When the window was opened from a [window preset](../../../fork/window-presets.md),
+WezTerm adds the prefix `[<preset name>] ` in front of whatever title results,
+whether it came from this event or from the default processing. The prefix is
+added outside the event's return value, so the event cannot remove it.
+
 If the event encounters an error, or returns something that is not a string,
 then the default window title text will be computed and used instead.
 

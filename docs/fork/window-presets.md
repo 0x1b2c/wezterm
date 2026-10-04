@@ -157,6 +157,16 @@ launching the GUI spawns the local mux server, which inherits the GUI's
 environment. A server started independently, such as a remote mux server,
 needs the variable set in its own environment instead.
 
+## Window title prefix
+
+The operating-system title of a preset window always starts with
+`[<preset name>] `, for example `[control_center] [2/5] ✳ Claude Code`. The
+prefix is added outside the result of the `format-window-title` event, so a
+custom title cannot remove it, and it also appears on a machine that attached
+to a preset window opened from elsewhere. Windows that were not opened by a
+preset keep their usual title. External tools such as window managers can use
+the prefix to recognize preset windows.
+
 ## Remote mux servers
 
 Everything above works identically when the GUI is attached to a remote mux
