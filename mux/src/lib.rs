@@ -1005,7 +1005,18 @@ impl Mux {
         workspace: Option<String>,
         position: Option<GuiPosition>,
     ) -> MuxWindowBuilder {
-        let window = Window::new(workspace, position);
+        self.new_empty_window_with_preset(workspace, position, None)
+    }
+
+    /// Like `new_empty_window`, but the window carries the name of the
+    /// window preset that opens it from the moment it exists.
+    pub fn new_empty_window_with_preset(
+        &self,
+        workspace: Option<String>,
+        position: Option<GuiPosition>,
+        preset: Option<String>,
+    ) -> MuxWindowBuilder {
+        let window = Window::new_with_preset(workspace, position, preset);
         let window_id = window.window_id();
         self.windows.write().insert(window_id, window);
         MuxWindowBuilder {
@@ -1339,6 +1350,35 @@ impl Mux {
         workspace_for_new_window: String,
         window_position: Option<GuiPosition>,
     ) -> anyhow::Result<(Arc<Tab>, Arc<dyn Pane>, WindowId)> {
+        self.spawn_tab_or_window_with_preset(
+            window_id,
+            domain,
+            command,
+            command_dir,
+            size,
+            current_pane_id,
+            workspace_for_new_window,
+            window_position,
+            None,
+        )
+        .await
+    }
+
+    /// Like `spawn_tab_or_window`, but when a new window is created it
+    /// carries the name of the window preset that opens it.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn spawn_tab_or_window_with_preset(
+        &self,
+        window_id: Option<WindowId>,
+        domain: SpawnTabDomain,
+        command: Option<CommandBuilder>,
+        command_dir: Option<String>,
+        size: TerminalSize,
+        current_pane_id: Option<PaneId>,
+        workspace_for_new_window: String,
+        window_position: Option<GuiPosition>,
+        preset: Option<String>,
+    ) -> anyhow::Result<(Arc<Tab>, Arc<dyn Pane>, WindowId)> {
         let domain = self
             .resolve_spawn_tab_domain(current_pane_id, &domain)
             .context("resolve_spawn_tab_domain")?;
@@ -1363,7 +1403,11 @@ impl Mux {
             (window_id, size)
         } else {
             term_config = None;
-            window_builder = self.new_empty_window(Some(workspace_for_new_window), window_position);
+            window_builder = self.new_empty_window_with_preset(
+                Some(workspace_for_new_window),
+                window_position,
+                preset,
+            );
             (*window_builder, size)
         };
 
