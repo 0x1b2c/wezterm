@@ -95,8 +95,15 @@ These carry no user-facing symptom; listed for completeness.
   Fixes the build script's `rerun-if-changed` path so macOS builds do not
   rebuild unnecessarily.
 
-- **[vendor-openssl-musl](https://github.com/0x1b2c/wezterm/compare/macos-rerun-if-changed...vendor-openssl-musl)**
-  Vendors OpenSSL for musl targets to enable static cross-compilation.
+- ~~**[vendor-openssl-musl](https://github.com/0x1b2c/wezterm/compare/macos-rerun-if-changed...vendor-openssl-musl)**
+  Vendors OpenSSL for musl targets to enable static cross-compilation.~~
+  Superseded upstream: [wezterm#8028](https://github.com/wezterm/wezterm/pull/8028)
+  (August 2026) makes the same `async_ossl` change, so the fork's version
+  (April 2026) was dropped when the stack was rebased in October 2026. The
+  original commit is kept as the tag
+  [`fork/superseded/vendor-openssl-musl`](https://github.com/0x1b2c/wezterm/tree/fork/superseded/vendor-openssl-musl).
+  The branch now carries only the `Cross.toml` setup that lets `cross` build
+  the static Linux binaries in its container.
 
 - **[objc-cargo-clippy-lint](https://github.com/0x1b2c/wezterm/compare/vendor-openssl-musl...objc-cargo-clippy-lint)**
   Whitelists the `objc` crate's `cargo-clippy` cfg in the workspace lint config
