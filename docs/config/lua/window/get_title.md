@@ -1,5 +1,7 @@
 # `window:get_title()`
 
+{{since('nightly')}}
+
 Returns the title most recently handed to the operating system for this GUI
 window. This is the text shown in the window's title bar, including the
 `[<preset name>] ` prefix of a [window preset](../../../fork/window-presets.md)
@@ -12,7 +14,7 @@ returns the title stored on the mux window (set through `OSC 0`, `OSC 2` or
 preset prefix.
 
 ```lua
-wezterm.on('update-right-status', function(window, pane)
+wezterm.on('update-status', function(window, pane)
   window:set_right_status(window:get_title())
 end)
 ```
