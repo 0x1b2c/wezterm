@@ -180,6 +180,56 @@ requirement names only the identifier.) This is not a claim of authorship:
 the app name, copyright notices, and license are unchanged, and WezTerm
 remains Wez Furlong's work.
 
+## Versioning
+
+Releases of this fork are numbered `MAJOR.MINOR.PATCH` and published under
+the name `1b2c-<version>`, for example `1b2c-1.4.0`. That name is the git
+tag, the GitHub release, and what `wezterm --version` prints, so a version
+reported anywhere points straight at its tag. Upstream's own versions are
+dates, so the two never look alike.
+
+- **MINOR** goes up when a release brings a new batch of features, and
+  PATCH starts again at 0.
+- **PATCH** goes up for a release with no new features, typically one that
+  only brings the fork up to date with upstream.
+- **MAJOR** marks a milestone and changes only rarely, by deliberate choice
+  rather than by rule.
+
+The first release is 1.4.0 rather than 1.0.0 because four batches of
+features came before it: the mux and latency fixes of late March and early
+April 2026, the tab and window management work and Window Presets of late
+April, Local Input Mode in May, and stable identities for preset windows in
+October. They were never released on their own, so 1.1 to 1.3 have no tags.
+
+`wezterm --version` also prints the mux **protocol revision**, as in
+`wezterm 1b2c-1.4.0 (protocol 1)`. The protocol revision is independent of
+the version: a GUI and a mux server can talk to each other only when their
+protocol revisions match (see [Building](#building)). Release notes say so
+whenever a release changes it, because every machine sharing mux sessions
+then has to be upgraded together.
+
+Scripts keep seeing upstream's format: `wezterm.version` in Lua,
+`TERM_PROGRAM_VERSION`, and the update check still report a date-based
+version, so comparisons written against upstream versions keep working. The
+fork version is available to configurations as
+[`wezterm.fork_version`](docs/config/lua/wezterm/fork_version.md).
+
+### Release tags and history
+
+This fork is a stack of patches rebased onto upstream, which rewrites its
+history. To keep release tags meaningful, history is only appended to
+between upstream syncs: after a release, new commits go on top of the
+stack, and moving commits into the branch they belong to waits for the next
+upstream sync, when the whole stack is rebased anyway. Within one upstream
+base, every release tag is therefore an ancestor of `master`.
+
+An upstream sync breaks that ancestry: the tags of earlier releases point at
+the stack as it was before the rebase, and they stay valid as records of
+exactly what was released. Each release's notes name the upstream commit it
+is based on. A local build reports the release it descends from, such as
+`1b2c-1.4.0-dev.3+abcd1234`, or `1b2c-dev+abcd1234` when no release is among
+its ancestors.
+
 ## License and attribution
 
 The license is unchanged from upstream WezTerm. All upstream copyright and
