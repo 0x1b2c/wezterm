@@ -455,7 +455,7 @@ macro_rules! pdu {
 /// branches leave this constant alone, and only the commit at the top of
 /// the stack increments the revision, once for each change to the
 /// protocol.
-pub const CODEC_VERSION: usize = 0x1b2c_0000;
+pub const CODEC_VERSION: usize = 0x1b2c_0001;
 
 // Defines the Pdu enum.
 // Each struct has an explicit identifying number.
