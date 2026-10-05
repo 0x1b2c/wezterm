@@ -38,3 +38,6 @@ pub fn version_line(codec_version: usize) -> &'static str {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod describe;
