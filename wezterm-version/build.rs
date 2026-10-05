@@ -1,3 +1,6 @@
+#[path = "src/describe.rs"]
+mod describe;
+
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
 
@@ -29,6 +32,18 @@ fn main() {
                     }
                 }
             }
+
+            // A release tag created on HEAD changes the fork version
+            // without moving HEAD's ref.
+            for tags in ["refs/tags", "packed-refs"] {
+                let path = repo_path.join(tags);
+                if path.exists() {
+                    println!(
+                        "cargo:rerun-if-changed={}",
+                        path.canonicalize().unwrap().display()
+                    );
+                }
+            }
         }
 
         if let Ok(output) = std::process::Command::new("git")
@@ -47,9 +62,11 @@ fn main() {
         }
     }
 
-    let fork_version = fork_tag.unwrap_or_else(|| match short_head_hash() {
-        Some(hash) => format!("1b2c-dev+{hash}"),
-        None => "1b2c-dev".to_string(),
+    let fork_version = fork_tag.unwrap_or_else(|| {
+        describe::fork_version_from_describe(
+            describe_release().as_deref(),
+            short_head_hash().as_deref(),
+        )
     });
 
     let target = std::env::var("TARGET").unwrap_or_else(|_| "unknown".to_string());
@@ -57,6 +74,29 @@ fn main() {
     println!("cargo:rustc-env=WEZTERM_TARGET_TRIPLE={}", target);
     println!("cargo:rustc-env=WEZTERM_CI_TAG={}", ci_tag);
     println!("cargo:rustc-env=WEZTERM_FORK_VERSION={}", fork_version);
+}
+
+/// The nearest release tag, in `git describe --long` form. Test tags made
+/// while debugging the release workflow are never taken for a release.
+fn describe_release() -> Option<String> {
+    let output = std::process::Command::new("git")
+        .args([
+            "describe",
+            "--tags",
+            "--long",
+            "--abbrev=8",
+            "--match",
+            "1b2c-*",
+            "--exclude",
+            "*-test.*",
+        ])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let describe = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    (!describe.is_empty()).then_some(describe)
 }
 
 fn short_head_hash() -> Option<String> {
