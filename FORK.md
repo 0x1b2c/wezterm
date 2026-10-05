@@ -47,7 +47,7 @@ user-facing symptom, are listed by branch name in the final section.
 - **Keystrokes feel sluggish because rendering waits for the next scheduled
   frame.** Fixed by triggering an immediate render poll right after a
   keystroke, reducing perceived input latency.
-  *Branch: [keystroke-render-poll](https://github.com/0x1b2c/wezterm/compare/mux-deadlock-fix...keystroke-render-poll).*
+  *Branch: [keystroke-render-poll](https://github.com/0x1b2c/wezterm/compare/fork-base...keystroke-render-poll).*
 
 ### Declare window layouts once, spawn them on demand
 
@@ -92,6 +92,13 @@ user-facing symptom, are listed by branch name in the final section.
 
 These carry no user-facing symptom; listed for completeness.
 
+- **[fork-base](https://github.com/0x1b2c/wezterm/compare/mux-deadlock-fix...fork-base)**
+  The fork's own documentation (this file, `docs/fork/`, the README banner),
+  the instructions for coding agents, and the fork's mux protocol version
+  range. It sits right above `mux-deadlock-fix`, which stays directly on
+  upstream for its pull request, so that every feature branch above it can
+  update the fork's documentation in the same commit as the feature.
+
 - **[macos-rerun-if-changed](https://github.com/0x1b2c/wezterm/compare/skip-resync-on-tab-resized...macos-rerun-if-changed)**
   Fixes the build script's `rerun-if-changed` path so macOS builds do not
   rebuild unnecessarily.
@@ -109,6 +116,15 @@ These carry no user-facing symptom; listed for completeness.
 - **[objc-cargo-clippy-lint](https://github.com/0x1b2c/wezterm/compare/vendor-openssl-musl...objc-cargo-clippy-lint)**
   Whitelists the `objc` crate's `cargo-clippy` cfg in the workspace lint config
   to silence spurious warnings.
+
+- **[macos-bundle-identity](https://github.com/0x1b2c/wezterm/compare/local-input...macos-bundle-identity)**
+  Adds the `justfile` with the build and bundle recipes, and gives macOS
+  builds the fork's own bundle identifier with a stable ad-hoc signature (see
+  [Bundle identifier and signing](#bundle-identifier-and-signing)).
+
+- **[windows-cross-build](https://github.com/0x1b2c/wezterm/compare/macos-bundle-identity...windows-cross-build)**
+  Cross-compiles and packages the Windows (MinGW) build with one command, and
+  moves machine-specific deploy recipes into the uncommitted `justfile.local`.
 
 Beyond the branches above, the stack also carries a few commits tagged
 `[local]`: a macOS `visibleFrame` window-geometry workaround, log tagging for
