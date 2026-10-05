@@ -110,3 +110,42 @@ jobs:
             WezTerm-*.zip
             WezTerm-*.zip.sha256
           if-no-files-found: error
+
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+      - name: Name the package
+        id: name
+        shell: bash
+        run: echo "label=$(ci/fork-release-label.sh)" >> "$GITHUB_OUTPUT"
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: x86_64-unknown-linux-musl
+      # Cross.toml's pre-build hooks need cross from git; the crates.io
+      # release ignores them.
+      - name: Install cross
+        shell: bash
+        run: cargo install cross --git https://github.com/cross-rs/cross
+      - name: Build
+        shell: bash
+        run: >-
+          cross build --release --target x86_64-unknown-linux-musl
+          -p wezterm -p wezterm-mux-server
+      - name: Package
+        shell: bash
+        run: >-
+          ci/fork-package-linux.sh target/x86_64-unknown-linux-musl/release
+          "wezterm-${{ steps.name.outputs.label }}-linux-x86_64-musl"
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-x86_64-musl
+          path: |
+            wezterm-*.tar.gz
+            wezterm-*.tar.gz.sha256
+          if-no-files-found: error
