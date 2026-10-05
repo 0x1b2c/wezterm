@@ -68,3 +68,45 @@ jobs:
             WezTerm-*.zip
             WezTerm-*.zip.sha256
           if-no-files-found: error
+
+  windows:
+    runs-on: windows-2025
+    env:
+      RUSTUP_WINDOWS_PATH_ADD_BIN: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+      - name: Name the package
+        id: name
+        shell: bash
+        run: echo "label=$(ci/fork-release-label.sh)" >> "$GITHUB_OUTPUT"
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+      # Upstream's workflow vendors dependencies into .cargo/config, which
+      # makes cargo ignore .cargo/config.toml and with it +crt-static, so the
+      # binaries would need the VC++ runtime installed. Release builds do not
+      # vendor.
+      - name: Build
+        shell: bash
+        run: |
+          export PATH="/c/Strawberry/perl/bin:$PATH"
+          cargo build --release -p wezterm-gui -p wezterm -p wezterm-mux-server -p strip-ansi-escapes
+      - name: Package
+        shell: bash
+        run: >-
+          ci/fork-package-windows.sh target/release
+          "WezTerm-${{ steps.name.outputs.label }}-windows-x86_64"
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-x86_64
+          path: |
+            WezTerm-*.zip
+            WezTerm-*.zip.sha256
+          if-no-files-found: error
