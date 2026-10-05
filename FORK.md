@@ -5,8 +5,10 @@ A personal fork of [WezTerm](https://github.com/wezterm/wezterm), maintained by
 
 ## Overview
 
-A personal fork, not a downstream distribution: no separate release channels, no
-rebranding, no intent to become a distinct product. It carries a stack of patches
+A personal fork, not a downstream distribution: no rebranding and no intent to
+become a distinct product. It does publish numbered releases with prebuilt
+packages and a Homebrew tap, so it can be installed without building it (see
+[Installing](#installing)). It carries a stack of patches
 on top of upstream WezTerm's `main`: daily-driver fixes and features for latency,
 multiplexer correctness, and workflow ergonomics not yet available upstream.
 
@@ -222,6 +224,51 @@ Beyond the branches above, the stack also carries a few commits tagged
 crash attribution, and build-noise suppression. These are experimental or
 environment-specific attempts rather than user-facing features, and are not
 documented individually.
+
+## Installing
+
+Each release is published on the
+[GitHub Releases](https://github.com/0x1b2c/wezterm/releases) page, with a
+`.sha256` file beside every package.
+
+### macOS: Homebrew
+
+```sh
+brew install --cask 0x1b2c/wezterm/wezterm-1b2c
+```
+
+The cask installs `WezTerm.app` and links `wezterm`, `wezterm-gui`,
+`wezterm-mux-server` and `strip-ansi-escapes` into Homebrew's `bin`. It
+conflicts with the official `wezterm` and `wezterm@nightly` casks, which link
+the same names, so uninstall one before installing the other. The packages are
+ad-hoc signed and not notarized; the cask clears the quarantine attribute from
+the app after installing it.
+
+### macOS: direct download
+
+Download `WezTerm-1b2c-<version>-macos-arm64.zip` (Apple silicon) or
+`WezTerm-1b2c-<version>-macos-x86_64.zip` (Intel) and unzip it. Because the app
+is not notarized, macOS refuses to open it while the download's quarantine
+attribute is set. Clear the attribute, then move the app to `/Applications`:
+
+```sh
+xattr -cr WezTerm.app
+```
+
+### Windows
+
+Download `WezTerm-1b2c-<version>-windows-x86_64.zip`, unzip it, and run
+`wezterm-gui.exe`. The executables are not signed, so Windows SmartScreen may
+show "Windows protected your PC". Choose "More info", then "Run anyway". To
+avoid the prompt for every executable, open the zip's Properties before
+unzipping and tick "Unblock".
+
+### Linux
+
+`wezterm-1b2c-<version>-linux-x86_64-musl.tar.gz` holds static `wezterm` and
+`wezterm-mux-server` binaries, for the command line and for running a mux
+server on a remote machine. There is no GUI package for Linux; build one from
+source (see [Building](#building)).
 
 ## Building
 
