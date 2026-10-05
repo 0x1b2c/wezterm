@@ -8,6 +8,7 @@ A personal fork of WezTerm that carries a stack of patches on `master`; `FORK.md
 - Fork features are documented in `FORK.md` and `docs/fork/`, never in upstream's `docs/changelog.md`.
 - Committed files never name local machines, user names, or local paths; machine-specific recipes belong in the uncommitted `justfile.local`.
 - A change to a mux PDU leaves `CODEC_VERSION` alone in its own commit; the commit at the top of the stack increments the fork's codec revision (`0x1b2c_xxxx`). The comment on `CODEC_VERSION` in `codec/src/lib.rs` explains why.
+- Release version numbers and the history rules that keep release tags meaningful are described in the Versioning section of `FORK.md`.
 
 ## Verification
 
