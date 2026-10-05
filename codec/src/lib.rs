@@ -478,7 +478,7 @@ pub const UPSTREAM_CODEC_VERSION: usize = 46;
 /// corrected, it equals that number of patches; the fixups between two
 /// releases count up from it, so the revision can run ahead of the patch
 /// count when one patch changes the protocol more than once.
-pub const FORK_PROTOCOL_REVISION: usize = 0;
+pub const FORK_PROTOCOL_REVISION: usize = 3;
 
 // Each part of `CODEC_VERSION` has one byte.
 const _: () = assert!(UPSTREAM_CODEC_VERSION < 0x100 && FORK_PROTOCOL_REVISION < 0x100);
