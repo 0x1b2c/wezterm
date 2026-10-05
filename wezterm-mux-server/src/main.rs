@@ -17,7 +17,7 @@ mod daemonize;
 #[derive(Debug, Parser)]
 #[command(
     about = "Wez's Terminal Emulator\nhttp://github.com/wezterm/wezterm",
-    version = config::wezterm_version(),
+    version = wezterm_version::version_line(codec::CODEC_VERSION),
     trailing_var_arg = true,
 )]
 struct Opt {

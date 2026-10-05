@@ -6902,6 +6902,7 @@ dependencies = [
  "wezterm-client",
  "wezterm-gui-subcommands",
  "wezterm-term",
+ "wezterm-version",
  "winapi",
 ]
 
@@ -7181,6 +7182,7 @@ dependencies = [
  "wezterm-ssh",
  "wezterm-term",
  "wezterm-toast-notification",
+ "wezterm-version",
  "wgpu",
  "winapi",
  "window",
@@ -7214,6 +7216,7 @@ dependencies = [
  "async_ossl",
  "cc",
  "clap",
+ "codec",
  "config",
  "embed-resource",
  "env-bootstrap",
@@ -7229,6 +7232,7 @@ dependencies = [
  "wezterm-gui-subcommands",
  "wezterm-mux-server-impl",
  "wezterm-term",
+ "wezterm-version",
  "winapi",
 ]
 

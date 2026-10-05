@@ -2,14 +2,28 @@ use std::sync::OnceLock;
 
 static VERSION: OnceLock<&'static str> = OnceLock::new();
 static TRIPLE: OnceLock<&'static str> = OnceLock::new();
+static FORK_VERSION: OnceLock<&'static str> = OnceLock::new();
 
-pub fn assign_version_info(version: &'static str, triple: &'static str) {
+pub fn assign_version_info(
+    version: &'static str,
+    triple: &'static str,
+    fork_version: &'static str,
+) {
     VERSION.set(version).unwrap();
     TRIPLE.set(triple).unwrap();
+    FORK_VERSION.set(fork_version).unwrap();
 }
 
 pub fn wezterm_version() -> &'static str {
     VERSION
+        .get()
+        .unwrap_or(&"someone forgot to call assign_version_info")
+}
+
+/// This fork's own version, such as `1b2c-1.4.0`; `wezterm_version` keeps
+/// upstream's format.
+pub fn wezterm_fork_version() -> &'static str {
+    FORK_VERSION
         .get()
         .unwrap_or(&"someone forgot to call assign_version_info")
 }

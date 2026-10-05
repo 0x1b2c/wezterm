@@ -68,7 +68,7 @@ pub use termwindow::{set_window_class, set_window_position, TermWindow, ICON_DAT
 #[derive(Debug, Parser)]
 #[command(
     about = "Wez's Terminal Emulator\nhttp://github.com/wezterm/wezterm",
-    version = config::wezterm_version()
+    version = wezterm_version::version_line(codec::CODEC_VERSION)
 )]
 struct Opt {
     /// Skip loading wezterm.lua
