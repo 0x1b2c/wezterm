@@ -442,7 +442,45 @@ macro_rules! pdu {
 /// The overall version of the codec.
 /// This must be bumped when backwards incompatible changes
 /// are made to the types and protocol.
-pub const CODEC_VERSION: usize = 46;
+///
+/// This fork numbers its codec in a range of its own instead of
+/// continuing upstream's sequence. Written in hex as `0x1b2c_UUNN`, the high
+/// 16 bits are the fork's name, 0x1b2c, which upstream's counter never
+/// reaches, so a fork build never takes an upstream build for a compatible
+/// peer; `UU` is upstream's own codec version, `UPSTREAM_CODEC_VERSION`; and
+/// `NN` is the fork's protocol revision, `FORK_PROTOCOL_REVISION`. A protocol
+/// change on either side changes the number, and each side is recorded on a
+/// line of its own, so the two never get in each other's way.
+pub const CODEC_VERSION: usize =
+    0x1b2c_0000 | (UPSTREAM_CODEC_VERSION << 8) | FORK_PROTOCOL_REVISION;
+
+/// Upstream's own codec version, kept by the commit at the base of the patch
+/// stack. Upstream bumps its version on this line, so syncing with upstream
+/// conflicts here whenever upstream has changed the protocol, and the
+/// resolution is always to take upstream's new number.
+pub const UPSTREAM_CODEC_VERSION: usize = 46;
+
+/// The fork's protocol revision. Several branches of the patch stack change
+/// the protocol; if each bumped the revision itself, reordering the stack or
+/// inserting a commit into a lower branch would renumber every later bump,
+/// and git can silently merge two bumps into one. So the revision is set on
+/// this line by a single revision commit at the top of the stack, and
+/// protocol changes in the branches leave it alone. It counts only the
+/// fork's own protocol changes, which keeps this line clear of upstream's
+/// edits. Between releases, each protocol change adds a `fixup!` commit for
+/// the revision commit that raises the revision by one, so builds that
+/// cannot talk to each other never share a number. A release squashes those
+/// fixups into the revision commit and sets the revision to the number of
+/// patches (branches) in the stack that change the protocol, so that a build
+/// carrying only some of the patches can still be numbered consistently.
+/// Whenever the revision is settled, at a release or when a miscount is
+/// corrected, it equals that number of patches; the fixups between two
+/// releases count up from it, so the revision can run ahead of the patch
+/// count when one patch changes the protocol more than once.
+pub const FORK_PROTOCOL_REVISION: usize = 0;
+
+// Each part of `CODEC_VERSION` has one byte.
+const _: () = assert!(UPSTREAM_CODEC_VERSION < 0x100 && FORK_PROTOCOL_REVISION < 0x100);
 
 // Defines the Pdu enum.
 // Each struct has an explicit identifying number.
@@ -1157,6 +1195,13 @@ mod test {
         assert_eq!(decoded.ident, 0x81);
         assert_eq!(decoded.serial, 0x42);
         assert_eq!(decoded.data, b"hello");
+    }
+
+    #[test]
+    fn the_codec_version_carries_the_forks_name_upstreams_version_and_the_forks_revision() {
+        assert_eq!(CODEC_VERSION >> 16, 0x1b2c);
+        assert_eq!((CODEC_VERSION >> 8) & 0xff, UPSTREAM_CODEC_VERSION);
+        assert_eq!(CODEC_VERSION & 0xff, FORK_PROTOCOL_REVISION);
     }
 
     #[test]

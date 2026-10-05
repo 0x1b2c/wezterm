@@ -7,7 +7,7 @@ A personal fork of WezTerm that carries a stack of patches on `master`; `FORK.md
 - Everything committed to this repository is written in English.
 - Fork features are documented in `FORK.md` and `docs/fork/`, never in upstream's `docs/changelog.md`.
 - Committed files never name local machines, user names, or local paths; machine-specific recipes belong in the uncommitted `justfile.local`.
-- Any change to a mux PDU bumps `CODEC_VERSION` in `codec/src/lib.rs`.
+- A change to a mux PDU leaves `CODEC_VERSION` alone in its own commit; the commit at the top of the stack increments the fork's codec revision (`0x1b2c_xxxx`). The comment on `CODEC_VERSION` in `codec/src/lib.rs` explains why.
 
 ## Verification
 

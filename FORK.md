@@ -117,6 +117,12 @@ documented individually.
 
 ## Building
 
+Fork builds number their mux protocol in a range of their own
+(`0x1b2c_UUNN`, with upstream's protocol version in `UU` and the fork's
+revision in `NN`), so a fork build refuses to connect to an upstream WezTerm
+mux server and the reverse, instead of exchanging messages neither side can
+decode. Run the same fork build at both ends of a mux connection.
+
 Upstream ships CI configuration but no simple local build script. This fork adds
 a [`justfile`](justfile) at the repository root for that purpose. Run `just` to
 list the available recipes.
