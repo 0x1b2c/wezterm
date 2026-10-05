@@ -2,7 +2,7 @@ use anyhow::{anyhow, Context};
 use clap::builder::ValueParser;
 use clap::{Parser, ValueEnum, ValueHint};
 use clap_complete::{generate as generate_completion, shells, Generator as CompletionGenerator};
-use config::{wezterm_version, ConfigHandle};
+use config::ConfigHandle;
 use mux::Mux;
 use std::ffi::OsString;
 use std::io::Read;
@@ -24,7 +24,7 @@ mod cli;
 #[derive(Debug, Parser)]
 #[command(
     about = "Wez's Terminal Emulator\nhttp://github.com/wezterm/wezterm",
-    version = wezterm_version()
+    version = wezterm_version::version_line(codec::CODEC_VERSION)
 )]
 pub struct Opt {
     /// Skip loading wezterm.lua

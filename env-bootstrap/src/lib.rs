@@ -210,6 +210,7 @@ pub fn bootstrap() {
     config::assign_version_info(
         wezterm_version::wezterm_version(),
         wezterm_version::wezterm_target_triple(),
+        wezterm_version::wezterm_fork_version(),
     );
     setup_logger();
     register_panic_hook();

@@ -6,9 +6,13 @@ tags:
 ---
 # `wezterm.version`
 
-This constant is set to the `wezterm` version string that is also reported
-by running `wezterm -V`.  This can potentially be used to adjust configuration
+This constant is set to the `wezterm` version string in upstream's
+date-based format.  This can potentially be used to adjust configuration
 according to the installed version.
+
+In this fork, `wezterm -V` reports the fork's own version instead; see
+[wezterm.fork_version](fork_version.md).  `wezterm.version` keeps upstream's
+format so that comparisons written against upstream versions keep working.
 
 The version string looks like `20200406-151651-5b700e4`.  You can compare the
 strings lexicographically if you wish to test whether a given version is newer

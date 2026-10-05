@@ -325,6 +325,7 @@ end
 
         wezterm_mod.set("target_triple", crate::wezterm_target_triple())?;
         wezterm_mod.set("version", crate::wezterm_version())?;
+        wezterm_mod.set("fork_version", crate::wezterm_fork_version())?;
         wezterm_mod.set("home_dir", crate::HOME_DIR.to_str())?;
         wezterm_mod.set(
             "running_under_wsl",
