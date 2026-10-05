@@ -1,12 +1,16 @@
 # Release builds for this fork. Kept separate from upstream's workflows so
 # that syncing with upstream never conflicts here.
 #
-# A push to a `ci/**` branch builds every platform and uploads the packages
-# as Actions artifacts, for debugging the workflow itself.
+# Pushing a `1b2c-*` tag builds every platform and publishes a GitHub
+# Release whose notes are the tag's message. A push to a `ci/**` branch runs
+# the same builds and only uploads the packages as Actions artifacts, for
+# debugging the workflow itself.
 name: fork_release
 
 on:
   push:
+    tags:
+      - "1b2c-*"
     branches:
       - "ci/**"
 
@@ -149,3 +153,37 @@ jobs:
             wezterm-*.tar.gz
             wezterm-*.tar.gz.sha256
           if-no-files-found: error
+
+  release:
+    if: github.ref_type == 'tag'
+    needs: [macos, windows, linux]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      # The release notes are the annotated tag's message. Checkout leaves a
+      # lightweight copy of the tag, so fetch the tag object itself, then cut
+      # the PGP signature that `git tag -s` appends.
+      - name: Read the release notes from the tag
+        shell: bash
+        run: |
+          git fetch origin "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}" --no-tags --force
+          git for-each-ref "refs/tags/${GITHUB_REF_NAME}" --format='%(contents)' \
+            | sed '/^-----BEGIN PGP SIGNATURE-----$/,$d' > release-notes.md
+          cat release-notes.md
+      - name: Download packages
+        uses: actions/download-artifact@v4
+        with:
+          path: packages
+          merge-multiple: true
+      - name: Create the release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: WezTerm ${{ github.ref_name }}
+          body_path: release-notes.md
+          generate_release_notes: false
+          prerelease: ${{ contains(github.ref_name, '-test.') }}
+          files: packages/*
+          fail_on_unmatched_files: true
