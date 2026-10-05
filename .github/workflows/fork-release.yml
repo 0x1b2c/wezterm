@@ -65,7 +65,7 @@ jobs:
           "target/${{ matrix.target }}/release"
           "WezTerm-${{ steps.name.outputs.label }}-macos-${{ matrix.arch }}"
       - name: Upload
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: macos-${{ matrix.arch }}
           path: |
@@ -107,7 +107,7 @@ jobs:
           ci/fork-package-windows.sh target/release
           "WezTerm-${{ steps.name.outputs.label }}-windows-x86_64"
       - name: Upload
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: windows-x86_64
           path: |
@@ -146,7 +146,7 @@ jobs:
           ci/fork-package-linux.sh target/x86_64-unknown-linux-musl/release
           "wezterm-${{ steps.name.outputs.label }}-linux-x86_64-musl"
       - name: Upload
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: linux-x86_64-musl
           path: |
@@ -174,12 +174,12 @@ jobs:
             | sed '/^-----BEGIN PGP SIGNATURE-----$/,$d' > release-notes.md
           cat release-notes.md
       - name: Download packages
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: packages
           merge-multiple: true
       - name: Create the release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           name: WezTerm ${{ github.ref_name }}
           body_path: release-notes.md
