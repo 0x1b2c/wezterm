@@ -442,7 +442,20 @@ macro_rules! pdu {
 /// The overall version of the codec.
 /// This must be bumped when backwards incompatible changes
 /// are made to the types and protocol.
-pub const CODEC_VERSION: usize = 45;
+///
+/// This fork numbers its codec in a range of its own instead of
+/// continuing upstream's sequence: the high 16 bits are the fork's name,
+/// 0x1b2c, and the low 16 bits count the fork's protocol revisions.
+/// Upstream's counter never reaches this range, so a fork build never takes
+/// an upstream build for a compatible peer. Several branches of the patch
+/// stack change the protocol; if each bumped the version itself, reordering
+/// the stack or inserting a commit into a lower branch would renumber every
+/// later bump, and git can silently merge two bumps into one. So the commit
+/// at the base of the stack sets revision 0, protocol changes in the
+/// branches leave this constant alone, and only the commit at the top of
+/// the stack increments the revision, once for each change to the
+/// protocol.
+pub const CODEC_VERSION: usize = 0x1b2c_0000;
 
 // Defines the Pdu enum.
 // Each struct has an explicit identifying number.
