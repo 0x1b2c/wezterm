@@ -118,6 +118,10 @@ External tools can read the marker too: `wezterm cli list --format json`
 reports a `window_preset` field for every pane, holding the name of the
 preset that opened the pane's window, or `null` otherwise.
 
+In Lua, [`mux_window:get_preset_name()`](../config/lua/mux-window/get_preset_name.md)
+returns the same name (or `nil`), for example to show it in the tab bar from an
+`update-status` handler.
+
 The `WINDOW_PRESETS` flag also composes with the general-purpose launcher;
 the author's `Cmd+Shift+L` binding uses
 `{ flags = 'FUZZY|WINDOW_PRESETS|DOMAINS' }` so presets, domains, and the
