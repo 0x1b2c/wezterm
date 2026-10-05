@@ -64,6 +64,11 @@ impl UserData for MuxWindow {
             let mut window = this.resolve_mut(&mux)?;
             Ok(window.set_title(&title))
         });
+        methods.add_method("get_preset_name", |_, this, _: ()| {
+            let mux = get_mux()?;
+            let window = this.resolve(&mux)?;
+            Ok(window.get_preset().map(str::to_string))
+        });
         methods.add_method("tabs", |_, this, _: ()| {
             let mux = get_mux()?;
             let window = this.resolve(&mux)?;
@@ -107,3 +112,6 @@ impl UserData for MuxWindow {
         });
     }
 }
+
+#[cfg(test)]
+mod tests;
