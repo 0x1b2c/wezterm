@@ -33,10 +33,22 @@ fn main() {
                 }
             }
 
+            // HEAD's ref above may live only in packed-refs, in which case
+            // the next commit creates a loose ref file that was not watched.
+            // HEAD's reflog is appended to whenever HEAD moves.
+            let head_log = repo_path.join("logs/HEAD");
+            if head_log.exists() {
+                println!(
+                    "cargo:rerun-if-changed={}",
+                    head_log.canonicalize().unwrap().display()
+                );
+            }
+
             // A release tag created on HEAD changes the fork version
-            // without moving HEAD's ref.
+            // without moving HEAD's ref. Tags are shared by all worktrees.
+            let common_path = repo.commondir().to_path_buf();
             for tags in ["refs/tags", "packed-refs"] {
-                let path = repo_path.join(tags);
+                let path = common_path.join(tags);
                 if path.exists() {
                     println!(
                         "cargo:rerun-if-changed={}",
