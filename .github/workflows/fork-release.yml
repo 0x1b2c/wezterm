@@ -1,0 +1,70 @@
+# Release builds for this fork. Kept separate from upstream's workflows so
+# that syncing with upstream never conflicts here.
+#
+# A push to a `ci/**` branch builds every platform and uploads the packages
+# as Actions artifacts, for debugging the workflow itself.
+name: fork_release
+
+on:
+  push:
+    branches:
+      - "ci/**"
+
+permissions:
+  contents: read
+
+env:
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  macos:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            target: aarch64-apple-darwin
+          - arch: x86_64
+            target: x86_64-apple-darwin
+    runs-on: macos-15
+    env:
+      # Same floor as upstream; the arm64 target's own floor is higher.
+      MACOSX_DEPLOYMENT_TARGET: "10.12"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+      - name: Name the package
+        id: name
+        shell: bash
+        run: echo "label=$(ci/fork-release-label.sh)" >> "$GITHUB_OUTPUT"
+      - name: Install Rust target
+        shell: bash
+        run: rustup target add ${{ matrix.target }}
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - name: Build
+        shell: bash
+        run: >-
+          cargo build --release --target ${{ matrix.target }}
+          -p wezterm-gui -p wezterm -p wezterm-mux-server -p strip-ansi-escapes
+      - name: Install just
+        shell: bash
+        run: brew install just
+      - name: Package
+        shell: bash
+        run: >-
+          ci/fork-package-macos.sh
+          "target/${{ matrix.target }}/release"
+          "WezTerm-${{ steps.name.outputs.label }}-macos-${{ matrix.arch }}"
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ matrix.arch }}
+          path: |
+            WezTerm-*.zip
+            WezTerm-*.zip.sha256
+          if-no-files-found: error
