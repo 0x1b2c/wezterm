@@ -100,6 +100,17 @@ user-facing symptom, are listed by branch name in the final section.
   in use shows the other's size until it is used again.
   *Branch: not yet split out from `master`.*
 
+- **ssh in every pane suddenly stops finding its keys and asks for the key's
+  passphrase.** Panes reach ssh-agent through a link the mux server keeps
+  pointed at the agent of the most recently active client. A GUI started from
+  inside a pane inherits that pane's `SSH_AUTH_SOCK`, which is the link
+  itself, and reports it as its own agent; the mux server then pointed the
+  link at itself, and every pane lost the agent until the session was
+  restarted. The mux server now refuses a target that leads back to its own
+  link, directly or through other links, keeps the working one, and logs
+  `[fix:agent-self-link]`.
+  *Branch: not yet split out from `master`.*
+
 ### Failures should explain themselves
 
 - **When the remote SSH proxy command fails, all you get is an opaque
