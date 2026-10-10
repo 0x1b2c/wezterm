@@ -83,6 +83,7 @@ mod prevcursor;
 pub mod render;
 pub mod resize;
 mod selection;
+mod shared_size;
 pub mod spawn;
 pub mod webgpu;
 mod window_title;
@@ -397,6 +398,9 @@ pub struct TermWindow {
     pending_scale_changes: LinkedList<resize::ScaleChange>,
     /// Terminal dimensions
     terminal_size: TerminalSize,
+    /// The last time this window reported its size for a tab that another
+    /// client of a shared mux session had resized.
+    last_size_claim: Option<shared_size::SizeClaim>,
     pub mux_window_id: MuxWindowId,
     /// The title most recently handed to the operating system
     window_title: LastWindowTitle,
@@ -742,6 +746,7 @@ impl TermWindow {
             is_repaint_pending: false,
             pending_scale_changes: LinkedList::new(),
             terminal_size,
+            last_size_claim: None,
             render_state,
             input_map: InputMap::new(&config),
             leader_is_down: None,
@@ -978,9 +983,18 @@ impl TermWindow {
             }
             WindowEvent::FocusChanged(focused) => {
                 self.focus_changed(focused, window);
+                if focused {
+                    self.claim_shared_tab_size();
+                }
                 Ok(true)
             }
             WindowEvent::MouseEvent(event) => {
+                if !matches!(
+                    event.kind,
+                    MouseEventKind::Move | MouseEventKind::Release(_)
+                ) {
+                    self.claim_shared_tab_size();
+                }
                 self.mouse_event_impl(event, window);
                 Ok(true)
             }
@@ -1016,10 +1030,12 @@ impl TermWindow {
                 Ok(true)
             }
             WindowEvent::RawKeyEvent(event) => {
+                self.claim_shared_tab_size();
                 self.raw_key_event_impl(event, window);
                 Ok(true)
             }
             WindowEvent::KeyEvent(event) => {
+                self.claim_shared_tab_size();
                 self.key_event_impl(event, window);
                 Ok(true)
             }
@@ -2233,6 +2249,8 @@ impl TermWindow {
             window.remember_and_set_active_tab_idx(tab_idx);
 
             drop(window);
+
+            self.claim_shared_tab_size();
 
             if let Some(pane) = self.get_active_pane_or_overlay() {
                 pane.focus_changed(true);
