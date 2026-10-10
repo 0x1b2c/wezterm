@@ -124,6 +124,20 @@ user-facing symptom, are listed by branch name in the final section.
   NSEnableWindowTabIndexing -bool true` can still turn it back on.
   *Branch: not yet split out from `master`.*
 
+### SSH domains should find hosts the way `ssh` does
+
+- **An ssh domain fails with "failed to lookup address information" for a
+  host that plain `ssh` connects to.** The host was defined in a file pulled
+  in by `Include ~/.ssh/config.local`. WezTerm did not expand `~` in an
+  `Include` argument, and it resolved a relative argument against the
+  directory of the file containing the `Include`, so the included file was
+  never read and the alias was treated as a literal host name. WezTerm now
+  follows `ssh_config(5)`: a leading `~` is the home directory, and a
+  relative path is resolved against `~/.ssh` in a user config file and
+  against `/etc/ssh` in the system config file, however deeply the includes
+  are nested. Globs keep working.
+  *Branch: not yet split out from `master`.*
+
 ### Failures should explain themselves
 
 - **When the remote SSH proxy command fails, all you get is an opaque
