@@ -616,16 +616,18 @@ impl LauncherState {
                 // The launcher overlay runs on a worker thread, but
                 // dispatch_* relies on `promise::spawn::spawn` which uses
                 // a thread-local executor. Hop to the main thread first.
-                self.window.notify(TermWindowNotif::Apply(Box::new(move |_| {
-                    dispatch_materialize_window_preset(domain_id, name);
-                })));
+                self.window
+                    .notify(TermWindowNotif::Apply(Box::new(move |_| {
+                        dispatch_materialize_window_preset(domain_id, name);
+                    })));
             }
             EntryAction::KillPreset { name, domain_id } => {
                 // Hop to the main thread for the same reason as the
                 // MaterializePreset arm above.
-                self.window.notify(TermWindowNotif::Apply(Box::new(move |_| {
-                    dispatch_kill_window_preset(domain_id, name);
-                })));
+                self.window
+                    .notify(TermWindowNotif::Apply(Box::new(move |_| {
+                        dispatch_kill_window_preset(domain_id, name);
+                    })));
             }
         }
         true
