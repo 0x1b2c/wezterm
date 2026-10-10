@@ -407,6 +407,19 @@ impl SessionHandler {
                                 }
                             }
                             log::trace!("ListPanes {tabs:#?} {tab_titles:?}");
+                            log::debug!(
+                                target: "preset_sync",
+                                "[probe:preset-sync] server ListPanes windows=[{}]",
+                                mux.iter_windows()
+                                    .into_iter()
+                                    .filter_map(|id| mux.get_window(id).map(|w| format!(
+                                        "{id}:preset={:?}:tabs={}",
+                                        w.get_preset(),
+                                        w.count_tabs()
+                                    )))
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            );
                             Ok(Pdu::ListPanesResponse(ListPanesResponse {
                                 tabs,
                                 tab_titles,
@@ -1149,6 +1162,7 @@ async fn domain_spawn_v2(spawn: SpawnV2, client_id: Option<Arc<ClientId>>) -> an
     let mux = Mux::get();
     let _identity = mux.with_identity(client_id);
 
+    let requested_window_id = spawn.window_id;
     let (tab, pane, window_id) = mux
         .spawn_tab_or_window(
             spawn.window_id,
@@ -1161,6 +1175,15 @@ async fn domain_spawn_v2(spawn: SpawnV2, client_id: Option<Arc<ClientId>>) -> an
             None, // optional gui window position
         )
         .await?;
+    log::debug!(
+        target: "preset_sync",
+        "[probe:preset-sync] server SpawnV2 requested_window={:?} result window={} tab={} preset={:?}",
+        requested_window_id,
+        window_id,
+        tab.tab_id(),
+        mux.get_window(window_id)
+            .and_then(|w| w.get_preset().map(str::to_string))
+    );
 
     Ok::<Pdu, anyhow::Error>(Pdu::SpawnResponse(SpawnResponse {
         pane_id: pane.pane_id(),

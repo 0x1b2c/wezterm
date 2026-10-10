@@ -94,6 +94,12 @@ pub async fn materialize_window_preset(name: &str) -> anyhow::Result<Option<Wind
         )
         .await
         .with_context(|| format!("spawning first tab of window preset `{name}`"))?;
+    log::debug!(
+        target: "preset_sync",
+        "[probe:preset-sync] materialize preset={name} created window={window_id} preset={:?}",
+        mux.get_window(window_id)
+            .and_then(|w| w.get_preset().map(str::to_string))
+    );
 
     apply_send_text(first, &pane)
         .with_context(|| format!("send_text for first tab of window preset `{name}`"))?;
@@ -120,6 +126,11 @@ pub async fn materialize_window_preset(name: &str) -> anyhow::Result<Option<Wind
             .with_context(|| format!("send_text for tab #{idx} of window preset `{name}`"))?;
     }
 
+    log::debug!(
+        target: "preset_sync",
+        "[probe:preset-sync] materialize preset={name} window={window_id} done with {} tabs",
+        preset.tabs.len()
+    );
     Ok(Some(window_id))
 }
 

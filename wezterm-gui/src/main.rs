@@ -315,7 +315,18 @@ async fn spawn_tab_in_domain_if_mux_is_empty(
 
     domain.attach(Some(window_id)).await?;
 
-    if have_panes_in_domain_and_ws(&domain, &workspace) {
+    let have_panes = have_panes_in_domain_and_ws(&domain, &workspace);
+    log::debug!(
+        target: "preset_sync",
+        "[probe:preset-sync] spawn_tab_in_domain_if_mux_is_empty domain={} local_window={} \
+         is_connecting={} have_panes_after_attach={} will_spawn_default_tab={}",
+        domain.domain_id(),
+        window_id,
+        is_connecting,
+        have_panes,
+        !have_panes
+    );
+    if have_panes {
         trigger_and_log_gui_attached(MuxDomain(domain.domain_id())).await;
         return Ok(());
     }
@@ -470,6 +481,13 @@ async fn async_run_terminal_gui(
             };
 
             domain.attach(Some(window_id)).await?;
+            log::debug!(
+                target: "preset_sync",
+                "[probe:preset-sync] connect path: attached domain={} spawning default tab \
+                 into local_window={}",
+                domain.domain_id(),
+                window_id
+            );
             let config = config::configuration();
             let dpi = config.dpi.unwrap_or_else(|| ::window::default_dpi());
             let tab = domain

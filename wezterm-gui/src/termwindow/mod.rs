@@ -706,6 +706,12 @@ impl TermWindow {
                 .and_then(|window| window.get_preset().map(str::to_string))
                 .as_deref(),
         );
+        log::debug!(
+            target: "preset_sync",
+            "[probe:preset-sync] new TermWindow mux_window={} initial_title={:?}",
+            mux_window_id,
+            initial_title
+        );
 
         let myself = Self {
             created: Instant::now(),

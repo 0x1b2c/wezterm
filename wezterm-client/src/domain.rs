@@ -507,6 +507,31 @@ impl ClientDomain {
         mut primary_window_id: Option<WindowId>,
     ) -> anyhow::Result<()> {
         let mux = Mux::get();
+        {
+            let mut tabs_per_window: std::collections::BTreeMap<WindowId, usize> =
+                Default::default();
+            for tabroot in &panes.tabs {
+                if let Some((remote_window_id, _)) = tabroot.window_and_tab_ids() {
+                    *tabs_per_window.entry(remote_window_id).or_default() += 1;
+                }
+            }
+            for remote_window_id in panes.window_titles.keys() {
+                tabs_per_window.entry(*remote_window_id).or_default();
+            }
+            let windows: Vec<String> = tabs_per_window
+                .iter()
+                .map(|(id, tabs)| {
+                    format!("{id}:preset={:?}:tabs={tabs}", panes.window_presets.get(id))
+                })
+                .collect();
+            log::debug!(
+                target: "preset_sync",
+                "[probe:preset-sync] process_pane_list domain={} primary_window_id={:?} remote_windows=[{}]",
+                inner.local_domain_id,
+                primary_window_id,
+                windows.join(", ")
+            );
+        }
         log::debug!(
             "domain {}: ListPanes result {:#?}",
             inner.local_domain_id,
@@ -632,6 +657,16 @@ impl ClientDomain {
                         inner.local_domain_id,
                         local_window_id
                     );
+                    log::debug!(
+                        target: "preset_sync",
+                        "[probe:preset-sync] existing mapping remote_window={} -> local_window={} \
+                         remote_tab={} local_preset={:?} server_preset={:?}",
+                        remote_window_id,
+                        local_window_id,
+                        remote_tab_id,
+                        window.get_preset(),
+                        panes.window_presets.get(&remote_window_id)
+                    );
                     if window.get_tab_idx_for_id(tab.tab_id()).is_none() {
                         window.push_tab(&tab);
                     }
@@ -658,10 +693,21 @@ impl ClientDomain {
                             local_window_id,
                         );
                         if let Some(mut window) = mux.get_window_mut(local_window_id) {
+                            let before = window.get_preset().map(str::to_string);
                             window.set_preset_from_server(preset_of_remote_window(
                                 &panes.window_presets,
                                 remote_window_id,
                             ));
+                            log::debug!(
+                                target: "preset_sync",
+                                "[probe:preset-sync] primary takeover remote_window={} -> \
+                                 local_window={} remote_tab={} preset_before={:?} preset_after={:?}",
+                                remote_window_id,
+                                local_window_id,
+                                remote_tab_id,
+                                before,
+                                window.get_preset()
+                            );
                         }
                         mux.add_tab_to_window(&tab, local_window_id)?;
                         primary_window_id.take();
@@ -678,6 +724,17 @@ impl ClientDomain {
                     workspace.take(),
                     position,
                     preset_of_remote_window(&panes.window_presets, remote_window_id),
+                );
+                log::debug!(
+                    target: "preset_sync",
+                    "[probe:preset-sync] new local window remote_window={} -> local_window={} \
+                     remote_tab={} preset={:?} unused_primary={:?}",
+                    remote_window_id,
+                    *local_window_id,
+                    remote_tab_id,
+                    mux.get_window(*local_window_id)
+                        .and_then(|w| w.get_preset().map(str::to_string)),
+                    primary_window_id
                 );
                 inner.record_remote_to_local_window_mapping(remote_window_id, *local_window_id);
                 mux.add_tab_to_window(&tab, *local_window_id)?;
@@ -701,6 +758,11 @@ impl ClientDomain {
                     remote_panes_to_forget={remote_panes_to_forget:?}"
         );
         if !remote_windows_to_forget.is_empty() {
+            log::debug!(
+                target: "preset_sync",
+                "[probe:preset-sync] forgetting remote windows {:?}",
+                remote_windows_to_forget
+            );
             let mut windows = inner.remote_to_local_window.lock().unwrap();
             for w in remote_windows_to_forget {
                 windows.remove(&w);
@@ -728,6 +790,13 @@ impl ClientDomain {
         panes: ListPanesResponse,
         primary_window_id: Option<WindowId>,
     ) -> anyhow::Result<()> {
+        log::debug!(
+            target: "preset_sync",
+            "[probe:preset-sync] finish_attach domain={} primary_window_id={:?} remote_tabs={}",
+            domain_id,
+            primary_window_id,
+            panes.tabs.len()
+        );
         let mux = Mux::get();
         let domain = mux
             .get_domain(domain_id)
@@ -842,11 +911,12 @@ impl Domain for ClientDomain {
 
         let workspace = Mux::get().active_workspace();
 
+        let requested_remote_window = inner.local_to_remote_window(window);
         let result = inner
             .client
             .spawn_v2(SpawnV2 {
                 domain: SpawnTabDomain::DefaultDomain,
-                window_id: inner.local_to_remote_window(window),
+                window_id: requested_remote_window,
                 size,
                 command,
                 command_dir,
@@ -854,6 +924,18 @@ impl Domain for ClientDomain {
             })
             .await?;
 
+        log::debug!(
+            target: "preset_sync",
+            "[probe:preset-sync] spawn requested_remote_window={:?} result remote_window={} \
+             -> local_window={} remote_tab={} local_preset={:?}",
+            requested_remote_window,
+            result.window_id,
+            window,
+            result.tab_id,
+            Mux::get()
+                .get_window(window)
+                .and_then(|w| w.get_preset().map(str::to_string))
+        );
         inner.record_remote_to_local_window_mapping(result.window_id, window);
 
         let pane: Arc<dyn Pane> = Arc::new(ClientPane::new(
@@ -944,6 +1026,13 @@ impl Domain for ClientDomain {
     }
 
     async fn attach(&self, window_id: Option<WindowId>) -> anyhow::Result<()> {
+        log::debug!(
+            target: "preset_sync",
+            "[probe:preset-sync] attach domain={} window_id={:?} state={:?}",
+            self.local_domain_id,
+            window_id,
+            self.state()
+        );
         if self.state() == DomainState::Attached {
             // Already attached
             return Ok(());
