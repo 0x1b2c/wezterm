@@ -9,7 +9,7 @@ use mux::connui::{ConnectionUI, ConnectionUIParams};
 use mux::domain::{alloc_domain_id, Domain, DomainId, DomainState, SplitSource};
 use mux::pane::{Pane, PaneId};
 use mux::tab::{SplitRequest, Tab, TabId};
-use mux::window::WindowId;
+use mux::window::{Window, WindowId};
 use mux::{Mux, MuxNotification};
 use portable_pty::CommandBuilder;
 use promise::spawn::spawn_into_new_thread;
@@ -669,14 +669,22 @@ impl ClientDomain {
                 }
 
                 if let Some(local_window_id) = primary_window_id {
-                    // Verify that the workspace is consistent between the local and remote
-                    // windows
-                    if Some(
-                        mux.get_window(local_window_id)
-                            .expect("primary window to be valid")
-                            .get_workspace(),
-                    ) == workspace.as_deref()
-                    {
+                    let merge = {
+                        let primary = mux
+                            .get_window(local_window_id)
+                            .expect("primary window to be valid");
+                        // Verify that the workspace is consistent between the local and remote
+                        // windows
+                        if Some(primary.get_workspace()) == workspace.as_deref() {
+                            primary_merge(
+                                &primary,
+                                preset_of_remote_window(&panes.window_presets, remote_window_id),
+                            )
+                        } else {
+                            PrimaryMerge::Skip
+                        }
+                    };
+                    if merge != PrimaryMerge::Skip {
                         // Yes! We can use this window
                         log::debug!(
                             "adding remote window {} as tab to local window {}",
@@ -689,10 +697,9 @@ impl ClientDomain {
                         );
                         if let Some(mut window) = mux.get_window_mut(local_window_id) {
                             let before = window.get_preset().map(str::to_string);
-                            window.set_preset_from_server(preset_of_remote_window(
-                                &panes.window_presets,
-                                remote_window_id,
-                            ));
+                            if let PrimaryMerge::Adopt(preset) = merge {
+                                window.set_preset_from_server(Some(preset));
+                            }
                             log::debug!(
                                 target: "preset_sync",
                                 "[probe:preset-sync] primary takeover remote_window={} -> \
@@ -1107,6 +1114,33 @@ impl Domain for ClientDomain {
     }
 }
 
+/// How a remote window is taken into the primary window: the local window
+/// that `attach` was given, which is the GUI's empty startup window or the
+/// window from which another domain is being attached.
+#[derive(Debug, PartialEq, Eq)]
+enum PrimaryMerge {
+    /// Merge the remote window's tabs; the primary window keeps its preset.
+    Keep,
+    /// Merge the remote window's tabs and take its preset.
+    Adopt(String),
+    /// Leave the primary window alone; the remote window gets its own.
+    Skip,
+}
+
+/// A window keeps the preset it has. Only the empty, preset-less startup
+/// window takes the preset of the remote window merged into it; a remote
+/// preset window is never mixed into a window that is already in use or
+/// opened by another preset, so it gets a window of its own instead.
+fn primary_merge(primary: &Window, remote_preset: Option<String>) -> PrimaryMerge {
+    match remote_preset {
+        None => PrimaryMerge::Keep,
+        Some(preset) if primary.is_empty() && primary.get_preset().is_none() => {
+            PrimaryMerge::Adopt(preset)
+        }
+        Some(_) => PrimaryMerge::Skip,
+    }
+}
+
 /// The window preset the mux server reports for `remote_window_id`. A local
 /// mirror window takes its preset from here and from nowhere else.
 fn preset_of_remote_window(
@@ -1117,29 +1151,4 @@ fn preset_of_remote_window(
 }
 
 #[cfg(test)]
-mod test {
-    use super::*;
-    use mux::window::Window;
-
-    fn presets() -> HashMap<WindowId, String> {
-        let mut presets = HashMap::new();
-        presets.insert(7, "control_center".to_string());
-        presets
-    }
-
-    #[test]
-    fn wid_005_a_mirror_window_takes_the_preset_the_server_reports() {
-        assert_eq!(
-            preset_of_remote_window(&presets(), 7).as_deref(),
-            Some("control_center")
-        );
-        assert_eq!(preset_of_remote_window(&presets(), 8), None);
-    }
-
-    #[test]
-    fn wid_005_the_primary_window_adopts_the_preset_of_the_remote_window_merged_into_it() {
-        let mut primary = Window::new(Some("default".to_string()), None);
-        primary.set_preset_from_server(preset_of_remote_window(&presets(), 7));
-        assert_eq!(primary.get_preset(), Some("control_center"));
-    }
-}
+mod tests;
