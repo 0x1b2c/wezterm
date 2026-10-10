@@ -79,14 +79,80 @@ fn update_symlink<P: AsRef<Path>, Q: AsRef<Path>>(original: P, link: Q) -> anyho
     }
 }
 
+/// The outcome of pointing the agent link at a new target.
+#[derive(Debug, PartialEq, Eq)]
+enum LinkUpdate {
+    Updated,
+    RefusedLoop,
+}
+
+/// Point `link` at `target`, unless doing so would make `link` resolve back
+/// to itself.
+///
+/// Every pane of the local domain has `SSH_AUTH_SOCK` set to `link`, so a
+/// GUI started from a pane inherits it and reports it, or its own
+/// `agent.<pid>` link that already points here, as its agent socket. Taking
+/// that at face value would leave `link` pointing at itself and every pane
+/// without an agent ("Too many levels of symbolic links") until the session
+/// is restarted. Such a target is refused and the current one is kept.
+fn point_link_at(target: &Path, link: &Path) -> anyhow::Result<LinkUpdate> {
+    if target_leads_back_to(target, link) {
+        return Ok(LinkUpdate::RefusedLoop);
+    }
+    update_symlink(target, link)?;
+    Ok(LinkUpdate::Updated)
+}
+
+/// Whether following `target` through any symlinks reaches `link`, or never
+/// reaches a file at all because the chain itself loops.
+fn target_leads_back_to(target: &Path, link: &Path) -> bool {
+    // The same limit the kernel applies before failing with ELOOP.
+    const MAX_HOPS: usize = 40;
+
+    let link = comparable(link);
+    let mut current = target.to_path_buf();
+    for _ in 0..MAX_HOPS {
+        if comparable(&current) == link {
+            return true;
+        }
+        match std::fs::read_link(&current) {
+            Ok(next) if next.is_absolute() => current = next,
+            Ok(next) => current = current.parent().map(|dir| dir.join(&next)).unwrap_or(next),
+            // Not a symlink (the agent socket itself) or not there at all.
+            Err(_) => return false,
+        }
+    }
+    true
+}
+
+/// `path` with its directory resolved, so that two spellings of the same
+/// entry compare equal. The entry itself is left unresolved: it is the
+/// symlink being compared.
+fn comparable(path: &Path) -> PathBuf {
+    match (path.parent(), path.file_name()) {
+        (Some(dir), Some(name)) => match dir.canonicalize() {
+            Ok(dir) => dir.join(name),
+            Err(_) => path.to_path_buf(),
+        },
+        _ => path.to_path_buf(),
+    }
+}
+
 impl AgentProxy {
     pub fn new() -> Self {
         let pid = unsafe { libc::getpid() };
         let sock_path = config::RUNTIME_DIR.join(format!("agent.{pid}"));
 
         if let Some(inherited) = Self::default_ssh_auth_sock() {
-            if let Err(err) = update_symlink(&inherited, &sock_path) {
-                log::error!("failed to set {sock_path:?} to initial inherited SSH_AUTH_SOCK value of {inherited:?}: {err:#}");
+            match point_link_at(Path::new(&inherited), &sock_path) {
+                Ok(LinkUpdate::Updated) => {}
+                Ok(LinkUpdate::RefusedLoop) => log::warn!(
+                    "[fix:agent-self-link] not pointing {} at the inherited \
+                     SSH_AUTH_SOCK {inherited}: it leads back to {}",
+                    sock_path.display(),
+                    sock_path.display(),
+                ),
+                Err(err) => log::error!("failed to set {sock_path:?} to initial inherited SSH_AUTH_SOCK value of {inherited:?}: {err:#}"),
             }
         }
 
@@ -192,13 +258,24 @@ impl AgentProxy {
                         "Will update {} -> {ssh_auth_sock}",
                         self.sock_path.display(),
                     );
+                    // Recorded even when the target is refused below, so
+                    // that the refusal is logged once per change of client
+                    // rather than on every input from it.
                     self.current_target.write().replace(info.client_id.clone());
 
-                    if let Err(err) = update_symlink(ssh_auth_sock, &self.sock_path) {
-                        log::error!(
+                    match point_link_at(Path::new(ssh_auth_sock), &self.sock_path) {
+                        Ok(LinkUpdate::Updated) => {}
+                        Ok(LinkUpdate::RefusedLoop) => log::warn!(
+                            "[fix:agent-self-link] keeping {} at its current target: \
+                             the most recently active client reports {ssh_auth_sock} \
+                             as its agent, which leads back to {}",
+                            self.sock_path.display(),
+                            self.sock_path.display(),
+                        ),
+                        Err(err) => log::error!(
                             "Problem updating {} -> {ssh_auth_sock}: {err:#}",
                             self.sock_path.display(),
-                        );
+                        ),
                     }
                 }
             }
@@ -214,5 +291,135 @@ impl AgentProxy {
                 }
             }
         }
+    }
+}
+
+#[cfg(all(test, unix))]
+mod test {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// A scratch directory under the system temp dir, removed on drop.
+    struct Scratch(PathBuf);
+
+    impl Scratch {
+        fn new() -> Self {
+            static COUNTER: AtomicUsize = AtomicUsize::new(0);
+            let dir = std::env::temp_dir().join(format!(
+                "wezterm-agent-link-test-{}-{}",
+                std::process::id(),
+                COUNTER.fetch_add(1, Ordering::SeqCst)
+            ));
+            std::fs::create_dir_all(&dir).unwrap();
+            Self(dir)
+        }
+
+        fn path(&self, name: &str) -> PathBuf {
+            self.0.join(name)
+        }
+
+        /// Stand-in for an ssh-agent socket: any non-symlink file will do.
+        fn socket(&self, name: &str) -> PathBuf {
+            let path = self.path(name);
+            std::fs::write(&path, b"").unwrap();
+            path
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            std::fs::remove_dir_all(&self.0).ok();
+        }
+    }
+
+    #[test]
+    fn an_ordinary_agent_socket_becomes_the_target() {
+        let dir = Scratch::new();
+        let link = dir.path("agent.100");
+        let first = dir.socket("first.sock");
+        let second = dir.socket("second.sock");
+        point_link_at(&first, &link).unwrap();
+
+        assert_eq!(point_link_at(&second, &link).unwrap(), LinkUpdate::Updated);
+        assert_eq!(std::fs::read_link(&link).unwrap(), second);
+    }
+
+    #[test]
+    fn a_symlink_chain_that_ends_at_an_agent_socket_becomes_the_target() {
+        let dir = Scratch::new();
+        let link = dir.path("agent.100");
+        let socket = dir.socket("agent.sock");
+        let other_mux_link = dir.path("agent.200");
+        symlink_file(&socket, &other_mux_link).unwrap();
+
+        assert_eq!(
+            point_link_at(&other_mux_link, &link).unwrap(),
+            LinkUpdate::Updated
+        );
+        assert_eq!(std::fs::read_link(&link).unwrap(), other_mux_link);
+    }
+
+    #[test]
+    fn the_link_itself_is_refused_and_the_working_target_is_kept() {
+        let dir = Scratch::new();
+        let link = dir.path("agent.100");
+        let socket = dir.socket("agent.sock");
+        point_link_at(&socket, &link).unwrap();
+
+        assert_eq!(
+            point_link_at(&link, &link).unwrap(),
+            LinkUpdate::RefusedLoop
+        );
+        assert_eq!(std::fs::read_link(&link).unwrap(), socket);
+    }
+
+    #[test]
+    fn the_link_spelled_through_another_path_is_refused() {
+        let dir = Scratch::new();
+        let link = dir.path("agent.100");
+        let socket = dir.socket("agent.sock");
+        point_link_at(&socket, &link).unwrap();
+        std::fs::create_dir(dir.path("sub")).unwrap();
+        let roundabout = dir.path("sub").join("..").join("agent.100");
+
+        assert_eq!(
+            point_link_at(&roundabout, &link).unwrap(),
+            LinkUpdate::RefusedLoop
+        );
+        assert_eq!(std::fs::read_link(&link).unwrap(), socket);
+    }
+
+    #[test]
+    fn a_link_that_leads_back_to_this_link_is_refused() {
+        let dir = Scratch::new();
+        let link = dir.path("agent.100");
+        let socket = dir.socket("agent.sock");
+        point_link_at(&socket, &link).unwrap();
+        // A GUI started from a pane names its own agent.<pid> link, which
+        // points at this mux's link.
+        let gui_link = dir.path("agent.300");
+        symlink_file(&link, &gui_link).unwrap();
+
+        assert_eq!(
+            point_link_at(&gui_link, &link).unwrap(),
+            LinkUpdate::RefusedLoop
+        );
+        assert_eq!(std::fs::read_link(&link).unwrap(), socket);
+    }
+
+    #[test]
+    fn a_target_that_is_itself_a_symlink_loop_is_refused() {
+        let dir = Scratch::new();
+        let link = dir.path("agent.100");
+        let socket = dir.socket("agent.sock");
+        point_link_at(&socket, &link).unwrap();
+        let stale = dir.path("agent.939");
+        symlink_file(&stale, &stale).unwrap();
+
+        assert_eq!(
+            point_link_at(&stale, &link).unwrap(),
+            LinkUpdate::RefusedLoop
+        );
+        assert_eq!(std::fs::read_link(&link).unwrap(), socket);
     }
 }
