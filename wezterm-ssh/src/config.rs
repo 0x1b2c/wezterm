@@ -149,8 +149,67 @@ struct ParsedConfigFile {
     loaded_files: Vec<PathBuf>,
 }
 
+/// Where `Include` arguments are resolved, which OpenSSH decides by the kind
+/// of config file the `Include` appears in rather than by its location.
+#[derive(Clone, Debug)]
+struct IncludeContext {
+    /// Replaces a leading `~` in an `Include` argument.
+    home: Option<PathBuf>,
+    /// The directory a relative `Include` argument is resolved against:
+    /// `~/.ssh` for a user config, `/etc/ssh` for the system config. It stays
+    /// the same however deeply includes are nested.
+    relative_base: Option<PathBuf>,
+}
+
+impl IncludeContext {
+    fn user(home: Option<PathBuf>) -> Self {
+        let relative_base = home.as_ref().map(|h| h.join(".ssh"));
+        Self {
+            home,
+            relative_base,
+        }
+    }
+
+    fn system(home: Option<PathBuf>, base: PathBuf) -> Self {
+        Self {
+            home,
+            relative_base: Some(base),
+        }
+    }
+
+    /// Picks the context for a config file read from `path`.
+    fn for_file(path: &Path, home: Option<PathBuf>) -> Self {
+        if path.starts_with("/etc/ssh") {
+            return Self::system(home, PathBuf::from("/etc/ssh"));
+        }
+        if let Ok(sysdrive) = std::env::var("SystemDrive") {
+            let dir = PathBuf::from(format!("{}/ProgramData/ssh", sysdrive));
+            if path.starts_with(&dir) {
+                return Self::system(home, dir);
+            }
+        }
+        Self::user(home)
+    }
+
+    /// Expands a leading `~` and anchors a relative path at `relative_base`.
+    fn resolve(&self, pattern: &str) -> Option<(String, PathBuf)> {
+        let expanded = if pattern == "~" || pattern.starts_with("~/") {
+            let home = self.home.as_ref()?;
+            format!("{}{}", home.display(), &pattern[1..])
+        } else {
+            pattern.to_string()
+        };
+        let base = if Path::new(&expanded).is_absolute() {
+            self.relative_base.clone().unwrap_or_default()
+        } else {
+            self.relative_base.clone()?
+        };
+        Some((expanded, base))
+    }
+}
+
 impl ParsedConfigFile {
-    fn parse(s: &str, cwd: Option<&Path>, source_file: Option<&Path>) -> Self {
+    fn parse(s: &str, ctx: &IncludeContext, source_file: Option<&Path>) -> Self {
         let mut options = ConfigMap::new();
         let mut groups = vec![];
         let mut loaded_files = vec![];
@@ -159,7 +218,7 @@ impl ParsedConfigFile {
             loaded_files.push(source.to_path_buf());
         }
 
-        Self::parse_impl(s, cwd, &mut options, &mut groups, &mut loaded_files);
+        Self::parse_impl(s, ctx, &mut options, &mut groups, &mut loaded_files);
 
         Self {
             options,
@@ -170,52 +229,39 @@ impl ParsedConfigFile {
 
     fn do_include(
         pattern: &str,
-        cwd: Option<&Path>,
+        ctx: &IncludeContext,
         options: &mut ConfigMap,
         groups: &mut Vec<MatchGroup>,
         loaded_files: &mut Vec<PathBuf>,
     ) {
-        match filenamegen::Glob::new(&pattern) {
+        let Some((expanded, base)) = ctx.resolve(pattern) else {
+            log::error!(
+                "error expanding `Include {}`: unable to determine the home directory",
+                pattern
+            );
+            return;
+        };
+        match filenamegen::Glob::new(&expanded) {
             Ok(g) => {
-                match cwd
-                    .as_ref()
-                    .map(|p| p.to_path_buf())
-                    .or_else(|| std::env::current_dir().ok())
-                {
-                    Some(cwd) => {
-                        for path in g.walk(&cwd) {
-                            let path = if path.is_absolute() {
-                                path
-                            } else {
-                                cwd.join(path)
-                            };
-                            match std::fs::read_to_string(&path) {
-                                Ok(data) => {
-                                    loaded_files.push(path.clone());
-                                    Self::parse_impl(
-                                        &data,
-                                        Some(&cwd),
-                                        options,
-                                        groups,
-                                        loaded_files,
-                                    );
-                                }
-                                Err(err) => {
-                                    log::error!(
-                                        "error expanding `Include {}`: unable to open {}: {:#}",
-                                        pattern,
-                                        path.display(),
-                                        err
-                                    );
-                                }
-                            }
+                for path in g.walk(&base) {
+                    let path = if path.is_absolute() {
+                        path
+                    } else {
+                        base.join(path)
+                    };
+                    match std::fs::read_to_string(&path) {
+                        Ok(data) => {
+                            loaded_files.push(path.clone());
+                            Self::parse_impl(&data, ctx, options, groups, loaded_files);
                         }
-                    }
-                    None => {
-                        log::error!(
-                            "error expanding `Include {}`: unable to determine cwd",
-                            pattern
-                        );
+                        Err(err) => {
+                            log::error!(
+                                "error expanding `Include {}`: unable to open {}: {:#}",
+                                pattern,
+                                path.display(),
+                                err
+                            );
+                        }
                     }
                 }
             }
@@ -227,7 +273,7 @@ impl ParsedConfigFile {
 
     fn parse_impl(
         s: &str,
-        cwd: Option<&Path>,
+        ctx: &IncludeContext,
         options: &mut ConfigMap,
         groups: &mut Vec<MatchGroup>,
         loaded_files: &mut Vec<PathBuf>,
@@ -275,7 +321,7 @@ impl ParsedConfigFile {
                 }
 
                 if k == "include" {
-                    Self::do_include(v, cwd, options, groups, loaded_files);
+                    Self::do_include(v, ctx, options, groups, loaded_files);
                     continue;
                 }
 
@@ -446,17 +492,24 @@ impl Config {
     /// Parse `config_string` as if it were the contents of an `ssh_config` file,
     /// and add that to the list of configs.
     pub fn add_config_string(&mut self, config_string: &str) {
-        self.config_files
-            .push(ParsedConfigFile::parse(config_string, None, None));
+        self.config_files.push(ParsedConfigFile::parse(
+            config_string,
+            &IncludeContext::user(dirs_next::home_dir()),
+            None,
+        ));
     }
 
     /// Open `path`, read its contents and parse it as an `ssh_config` file,
     /// adding that to the list of configs
     pub fn add_config_file<P: AsRef<Path>>(&mut self, path: P) {
+        self.add_config_file_with_home(path, dirs_next::home_dir());
+    }
+
+    fn add_config_file_with_home<P: AsRef<Path>>(&mut self, path: P, home: Option<PathBuf>) {
         if let Ok(data) = std::fs::read_to_string(path.as_ref()) {
             self.config_files.push(ParsedConfigFile::parse(
                 &data,
-                path.as_ref().parent(),
+                &IncludeContext::for_file(path.as_ref(), home),
                 Some(path.as_ref()),
             ));
         }
@@ -1632,5 +1685,79 @@ Config {
 }
 "#
         );
+    }
+
+    fn write(path: &Path, text: &str) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, text).unwrap();
+    }
+
+    fn load_user_config(home: &Path) -> Config {
+        let mut config = Config::new();
+        config.add_config_file_with_home(home.join(".ssh/config"), Some(home.to_path_buf()));
+        config
+    }
+
+    #[test]
+    fn include_expands_tilde_to_home() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let home = tmp.path();
+        write(&home.join(".ssh/config"), "Include ~/.ssh/config.local\n");
+        write(
+            &home.join(".ssh/config.local"),
+            "Host homura\n  HostName 10.0.1.2\n  Port 2022\n",
+        );
+        let opts = load_user_config(home).for_host("homura");
+        assert_eq!(opts["hostname"], "10.0.1.2");
+        assert_eq!(opts["port"], "2022");
+    }
+
+    #[test]
+    fn include_relative_path_in_user_config_is_based_on_dot_ssh() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let home = tmp.path();
+        write(&home.join(".ssh/config"), "Include config.d/*.conf\n");
+        write(
+            &home.join(".ssh/config.d/a.conf"),
+            "Host alpha\n  HostName 192.0.2.1\n",
+        );
+        let opts = load_user_config(home).for_host("alpha");
+        assert_eq!(opts["hostname"], "192.0.2.1");
+    }
+
+    #[test]
+    fn include_relative_path_stays_based_on_dot_ssh_when_nested() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let home = tmp.path();
+        write(&home.join(".ssh/config"), "Include config.d/outer.conf\n");
+        // Resolved against ~/.ssh, not against config.d/ where outer.conf lives.
+        write(
+            &home.join(".ssh/config.d/outer.conf"),
+            "Include inner.conf\n",
+        );
+        write(
+            &home.join(".ssh/inner.conf"),
+            "Host beta\n  HostName 192.0.2.2\n",
+        );
+        write(
+            &home.join(".ssh/config.d/inner.conf"),
+            "Host beta\n  HostName 192.0.2.99\n",
+        );
+        let opts = load_user_config(home).for_host("beta");
+        assert_eq!(opts["hostname"], "192.0.2.2");
+    }
+
+    #[test]
+    fn include_absolute_path_is_used_as_is() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let home = tmp.path().join("home");
+        let other = tmp.path().join("other/hosts.conf");
+        write(
+            &home.join(".ssh/config"),
+            &format!("Include {}\n", other.display()),
+        );
+        write(&other, "Host gamma\n  HostName 192.0.2.3\n");
+        let opts = load_user_config(&home).for_host("gamma");
+        assert_eq!(opts["hostname"], "192.0.2.3");
     }
 }
