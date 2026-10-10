@@ -111,6 +111,19 @@ user-facing symptom, are listed by branch name in the final section.
   `[fix:agent-self-link]`.
   *Branch: not yet split out from `master`.*
 
+### WezTerm should not keep macOS busy in the background
+
+- **On macOS 26 and later, Spotlight's indexing service writes gigabytes a
+  day on WezTerm's behalf.** AppKit indexes every window of an app into
+  Spotlight and resubmits all of them whenever any window title changes, with
+  no coalescing; a terminal's titles change several times a second (shell
+  directories, program titles, progress characters), and Spotlight rejects
+  every one of those updates. WezTerm now turns this indexing off at launch
+  through AppKit's undocumented `NSEnableWindowTabIndexing` default,
+  registered so that `defaults write org.1b2c.wezterm
+  NSEnableWindowTabIndexing -bool true` can still turn it back on.
+  *Branch: not yet split out from `master`.*
+
 ### Failures should explain themselves
 
 - **When the remote SSH proxy command fails, all you get is an opaque

@@ -1,8 +1,8 @@
 // let () = msg_send! is a common pattern for objc
 #![allow(clippy::let_unit_value)]
 
-use super::nsstring_to_str;
 use super::window::WindowInner;
+use super::{nsstring, nsstring_to_str};
 use crate::connection::ConnectionOps;
 use crate::macos::from_yes_no;
 use crate::os::macos::app::create_app_delegate;
@@ -12,7 +12,7 @@ use crate::Appearance;
 use cocoa::appkit::{NSApp, NSApplication, NSApplicationActivationPolicyRegular, NSScreen};
 use cocoa::base::{id, nil};
 use cocoa::foundation::{NSArray, NSInteger};
-use objc::runtime::Object;
+use objc::runtime::{Object, NO};
 use objc::*;
 use serde::Deserialize;
 use std::cell::RefCell;
@@ -27,11 +27,37 @@ pub struct Connection {
     pub(crate) gl_connection: RefCell<Option<Rc<crate::egl::GlConnection>>>,
 }
 
+/// Register WezTerm's own defaults for AppKit settings in the registration
+/// domain, so that a value the user writes with `defaults write
+/// org.1b2c.wezterm …` still takes precedence.
+///
+/// `NSEnableWindowTabIndexing`: since macOS 26, AppKit indexes every window
+/// of an app into Spotlight (log category `com.apple.AppKit:WindowTab`) and
+/// resubmits all of them each time any window title changes, with no
+/// coalescing. A terminal's titles change several times a second (shell
+/// directories, program titles, progress characters), so WezTerm kept
+/// corespotlightd busy around the clock, and corespotlightd rejects every one
+/// of those updates. The key is undocumented; setting it to false stops the
+/// indexing (measured on macOS 27.0.1). AppKit reads it once at launch, so it
+/// is registered before the shared NSApplication is created.
+fn register_app_defaults() {
+    unsafe {
+        let key = nsstring("NSEnableWindowTabIndexing");
+        let value: id = msg_send![class!(NSNumber), numberWithBool: NO];
+        let registration: id =
+            msg_send![class!(NSDictionary), dictionaryWithObject: value forKey: *key];
+        let defaults: id = msg_send![class!(NSUserDefaults), standardUserDefaults];
+        let () = msg_send![defaults, registerDefaults: registration];
+    }
+}
+
 impl Connection {
     pub(crate) fn create_new() -> anyhow::Result<Self> {
         // Ensure that the SPAWN_QUEUE is created; it will have nothing
         // to run right now.
         SPAWN_QUEUE.run();
+
+        register_app_defaults();
 
         unsafe {
             let ns_app = NSApp();
@@ -255,3 +281,6 @@ pub fn nsscreen_to_screen_info(screen: *mut Object) -> ScreenInfo {
 extern "C" {
     fn NSBeep();
 }
+
+#[cfg(test)]
+mod tests;
