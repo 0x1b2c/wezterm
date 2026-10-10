@@ -184,6 +184,16 @@ remote window that was opened by a preset is never merged into a window that
 already has tabs or a preset of its own: it opens as a separate window with
 its preset.
 
+The principle is that a preset window always stays a window of its own,
+whether its mux server is local or remote. In practice, connecting to another
+machine whose windows come from presets keeps every one of them in its own
+window. Attaching from a
+window that holds local tabs, upstream would fold the remote machine's first
+window into that local window, mixing its tabs with the local ones; here the
+local window stays as it was, and each remote preset window opens alongside
+it with its name. Windows that were not opened by a preset still merge as
+upstream does, so setups without presets behave exactly as before.
+
 ## Notes and caveats
 
 * Renaming or removing a preset in the config while its window is open
