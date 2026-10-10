@@ -85,6 +85,21 @@ user-facing symptom, are listed by branch name in the final section.
   around paste and full key capture still open.
   *Usage: [docs/fork/local-input.md](docs/fork/local-input.md). Branch: [local-input](https://github.com/0x1b2c/wezterm/compare/window-presets...local-input).*
 
+### One session shared by several machines
+
+- **Returning to a machine after using the same mux session from another one
+  leaves its window showing content laid out for the other machine.** Each
+  pane has one size on the mux server, set by whichever client resized it
+  last, and a client only reports its size when its own window changes size,
+  so the content overflows a smaller window or leaves a larger one
+  half-filled until the window is resized by hand. The size now follows the
+  client that was used last, like tmux's `window-size latest`: when a window
+  gains focus, receives a key press, a click or a scroll, or switches tabs,
+  it reports its own size for its active tab if the panes do not already
+  have it. While two machines show the session at the same time, the one not
+  in use shows the other's size until it is used again.
+  *Branch: not yet split out from `master`.*
+
 ### Failures should explain themselves
 
 - **When the remote SSH proxy command fails, all you get is an opaque
