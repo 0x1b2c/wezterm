@@ -52,8 +52,9 @@ impl Window {
 
     /// Adopt the preset reported by the mux server for the remote window
     /// this local window mirrors. Only the client's resync calls this, for
-    /// the window it created before attaching; it is deliberately not
-    /// exposed to Lua or the CLI, so the preset of a window stays fixed.
+    /// the empty, preset-less window it created before attaching; it is
+    /// deliberately not exposed to Lua or the CLI, so the preset of a window
+    /// stays fixed.
     pub fn set_preset_from_server(&mut self, preset: Option<String>) {
         self.preset = preset;
     }

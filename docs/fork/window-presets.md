@@ -178,6 +178,12 @@ server: the preset list comes from the server's config, and materialization
 and kill both happen on the server. The launcher is the only entry point;
 there are deliberately no per-preset key assignments.
 
+Attaching a domain from an existing window merges that domain's first window
+into it, as upstream does, and the current window keeps its own preset. A
+remote window that was opened by a preset is never merged into a window that
+already has tabs or a preset of its own: it opens as a separate window with
+its preset.
+
 ## Notes and caveats
 
 * Renaming or removing a preset in the config while its window is open
