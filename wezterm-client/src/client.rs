@@ -469,6 +469,12 @@ impl Drop for PromiseMap {
     }
 }
 
+/// How long a client keeps trying to reach a mux server it has just started.
+/// Right after login the system is busy, and the server's startup plus the
+/// re-exec it does to daemonize can take several seconds; a GUI that gave up
+/// sooner exited and left the server it started running without a client.
+const SPAWNED_SERVER_STARTUP_TIMEOUT: Duration = Duration::from_secs(15);
+
 pub fn unix_connect_with_retry(
     target: &UnixTarget,
     just_spawned: bool,
@@ -481,10 +487,19 @@ pub fn unix_connect_with_retry(
     }
 
     let max_attempts = max_attempts.unwrap_or(10);
+    let spawned_deadline = std::time::Instant::now() + SPAWNED_SERVER_STARTUP_TIMEOUT;
 
-    for iter in 0..max_attempts {
+    for iter in 0.. {
+        let out_of_time = if just_spawned {
+            std::time::Instant::now() >= spawned_deadline
+        } else {
+            iter >= max_attempts
+        };
+        if out_of_time && error.is_some() {
+            break;
+        }
         if iter > 0 {
-            std::thread::sleep(std::time::Duration::from_millis(iter * 50));
+            std::thread::sleep(std::time::Duration::from_millis((iter * 50).min(500)));
         }
         match target {
             UnixTarget::Socket(path) => match UnixStream::connect(path) {
@@ -1445,4 +1460,40 @@ impl Client {
         MaterializeWindowPresetResponse
     );
     rpc!(kill_window_preset, KillWindowPreset, UnitResponse);
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use std::time::Instant;
+    use wezterm_uds::UnixListener;
+
+    #[test]
+    fn a_just_spawned_server_that_starts_listening_after_a_few_seconds_is_still_reached() {
+        let path = crate::test_socket_path("slow-start");
+        let listen_path = path.clone();
+        let (client_done, server_may_stop) = std::sync::mpsc::channel::<()>();
+        let server = thread::spawn(move || {
+            thread::sleep(Duration::from_secs(3));
+            let listener = UnixListener::bind(&listen_path).unwrap();
+            // A connection completes from the backlog without an accept. The
+            // listener stays up until the client has finished retrying, so a
+            // retry delayed by a loaded machine still finds it.
+            let _ = server_may_stop.recv_timeout(Duration::from_secs(30));
+            drop(listener);
+        });
+
+        let started = Instant::now();
+        let result = unix_connect_with_retry(&UnixTarget::Socket(path.clone()), true, None);
+        let elapsed = started.elapsed();
+
+        let _ = client_done.send(());
+        server.join().unwrap();
+        let _ = std::fs::remove_file(&path);
+        assert!(
+            result.is_ok(),
+            "gave up after {elapsed:?}: {:#}",
+            result.err().unwrap()
+        );
+    }
 }

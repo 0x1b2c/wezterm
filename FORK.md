@@ -111,6 +111,17 @@ user-facing symptom, are listed by branch name in the final section.
   `[fix:agent-self-link]`.
   *Branch: not yet split out from `master`.*
 
+### The mux server should start reliably
+
+- **Right after login, the GUI quits with "Connection refused" and leaves a
+  mux server running with no window.** A GUI that finds no mux server starts
+  one, and then gave it about two and a half seconds to start listening. Just
+  after login the system is busy, and the server's startup plus the re-exec it
+  does to daemonize can take several seconds, so the GUI gave up and exited
+  while the server it had started came up a moment later. A client now keeps
+  trying to reach a server it has just started for up to 15 seconds.
+  *Branch: not yet split out from `master`.*
+
 ### WezTerm should not keep macOS busy in the background
 
 - **On macOS 26 and later, Spotlight's indexing service writes gigabytes a
