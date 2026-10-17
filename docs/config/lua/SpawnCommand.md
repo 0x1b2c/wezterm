@@ -33,8 +33,8 @@ wezterm.action.SpawnCommandInNewWindow {
   -- starts with `~/` is expanded to the home directory; other
   -- SpawnCommand consumers use the path as written. A tab of
   -- `config.window_presets` that omits `cwd` takes the directory of
-  -- the previous tab, if that tab has one, instead of inferring one
-  -- from the active pane.
+  -- the nearest earlier tab that names one, or the default directory
+  -- when no earlier tab does.
   -- See the `window_presets` page for details.
   cwd = '/some/path',
 
