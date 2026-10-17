@@ -187,51 +187,45 @@ fn lua_value_to_dynamic_impl(
         }
         LuaValue::Error(e) => return Err(e),
         LuaValue::Table(table) => {
+            // A table holding only the sequence 1..n is an array. One that
+            // also has other keys, such as `{ '~/x', cmd = 'ls' }`, becomes an
+            // object whose keys include the integer positions, so that a
+            // FromDynamic impl can read both kinds of entry.
             if let Ok(true) = table.contains_key(1) {
                 let mut array = vec![];
-                let pairs = table.clone();
-                for value in table.sequence_values() {
+                for value in table.clone().sequence_values() {
                     array.push(lua_value_to_dynamic(value?)?);
                 }
 
-                for pair in pairs.pairs::<LuaValue, LuaValue>() {
+                let mut only_sequence = true;
+                for pair in table.clone().pairs::<LuaValue, LuaValue>() {
                     let (key, _value) = pair?;
-                    match &key {
-                        LuaValue::Integer(n) if *n >= 1 && *n as usize <= array.len() => {
-                            // Ok!
-                        }
-                        _ => {
-                            let type_name = key.type_name();
-                            let key = ValuePrinter(key);
-                            return Err(mlua::Error::FromLuaConversionError {
-                                from: type_name,
-                                to: "numeric array index",
-                                message: Some(format!(
-                                    "Unexpected key {key:?} for array style table"
-                                )),
-                            });
-                        }
+                    if !matches!(key, LuaValue::Integer(n) if n >= 1 && n as usize <= array.len()) {
+                        only_sequence = false;
+                        break;
                     }
                 }
 
-                DynValue::Array(array.into())
-            } else {
-                let mut obj = BTreeMap::default();
-                for pair in table.pairs::<LuaValue, LuaValue>() {
-                    let (key, value) = pair?;
-                    let key = lua_value_to_dynamic(key)?;
-                    let lua_type = value.type_name();
-                    let value = lua_value_to_dynamic(value).map_err(|e| {
-                        mlua::Error::FromLuaConversionError {
-                            from: lua_type,
-                            to: "value",
-                            message: Some(format!("while processing {key:?}: {e}")),
-                        }
-                    })?;
-                    obj.insert(key, value);
+                if only_sequence {
+                    return Ok(DynValue::Array(array.into()));
                 }
-                DynValue::Object(obj.into())
             }
+
+            let mut obj = BTreeMap::default();
+            for pair in table.pairs::<LuaValue, LuaValue>() {
+                let (key, value) = pair?;
+                let key = lua_value_to_dynamic(key)?;
+                let lua_type = value.type_name();
+                let value = lua_value_to_dynamic(value).map_err(|e| {
+                    mlua::Error::FromLuaConversionError {
+                        from: lua_type,
+                        to: "value",
+                        message: Some(format!("while processing {key:?}: {e}")),
+                    }
+                })?;
+                obj.insert(key, value);
+            }
+            DynValue::Object(obj.into())
         }
     })
 }

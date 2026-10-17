@@ -31,8 +31,11 @@ wezterm.action.SpawnCommandInNewWindow {
   -- the current user.
   -- In a tab of `config.window_presets`, a `cwd` of `~` or one that
   -- starts with `~/` is expanded to the home directory; other
-  -- SpawnCommand consumers use the path as written. See the
-  -- `window_presets` page for details.
+  -- SpawnCommand consumers use the path as written. A tab of
+  -- `config.window_presets` that omits `cwd` takes the directory of
+  -- the previous tab, if that tab has one, instead of inferring one
+  -- from the active pane.
+  -- See the `window_presets` page for details.
   cwd = '/some/path',
 
   -- Sets additional environment variables in the environment for

@@ -55,8 +55,12 @@ user-facing symptom, are listed by branch name in the final section.
   fork adds Window Presets: declare window layouts in the config, then spawn
   and kill them on demand via launcher flags, so a known-good working set is
   always one command away. Includes a `SpawnCommand` `send_text` field so a
-  preset tab can auto-run a command in the default shell. A preset window's
-  title starts with `[<preset name>]`, so external tools can recognize it.
+  preset tab can auto-run a command in the default shell. A preset tab's
+  `cwd` may start with `~/`, and a tab that omits `cwd` opens in the previous
+  tab's directory, so a preset for one project names its directory once. A
+  tab may also give its directory as its first entry and a line to run in its
+  shell as `cmd`. A preset window's title starts with `[<preset name>]`, so
+  external tools can recognize it.
   *Usage: [docs/fork/window-presets.md](docs/fork/window-presets.md). Branch: [window-presets](https://github.com/0x1b2c/wezterm/compare/session-experience...window-presets).*
 
 - **There is no keybinding action to close a whole mux window at once**, which

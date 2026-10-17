@@ -13,68 +13,45 @@ This page is the usage guide. Reference pages:
 
 The API surface is small: each entry in a preset's `tabs` list is a
 [SpawnCommand](../config/lua/SpawnCommand.md). The first entry creates the
-window; the rest become additional tabs in order. The `send_text` field is a
-fork addition: it writes the given bytes to the pane's stdin right after
-spawn, which runs a command inside the default shell rather than replacing
-the shell via `args`; a trailing newline is required for the shell to execute
-the line. It is honored only by Window Presets materialization.
+window; the rest become additional tabs in order. Presets give a
+`SpawnCommand` four behaviors that no other use of it has:
 
-Raw `SpawnCommand` tables get repetitive for presets with many tabs in the
-same project tree, so the author's actual config wraps them in a small Lua
-helper where each tab is one of three compact forms:
-
-* `{ 'dir' }` sets the cwd; `~/`-prefixed and absolute paths are used as
-  given, and a bare name is anchored at the home directory.
-* `{}` inherits the cwd from the previous tab.
-* `{ cmd = '...' }` inherits the cwd and auto-runs a command in the default
-  shell via `send_text`.
-
-The cwd inheritance lives entirely in this helper; the underlying
-`window_presets` API takes plain `SpawnCommand` entries.
+* `cwd` may start with `~/`, or be just `~`, to name a directory under the
+  home directory on the machine that materializes the preset, which for a
+  remote mux server is the remote machine.
+* A tab that omits `cwd` opens in the previous tab's directory, so a project
+  directory shared by several tabs is written once. What carries over is the
+  `cwd` the previous tab was given, not where its shell has moved since, and
+  it carries over whatever that tab runs and whichever domain it uses. A
+  first tab without `cwd` opens in the default directory, as do the tabs
+  after it until one names a directory.
+* The `send_text` field, a fork addition, writes the given bytes to the
+  pane's stdin right after spawn, which runs a command inside the default
+  shell rather than replacing the shell via `args`; a trailing newline is
+  required for the shell to execute the line.
+* Two shorter forms: a tab's first positional entry is its directory, so
+  `{ '~/notes' }` is `{ cwd = '~/notes' }`, and `cmd = 'x'` types `x`
+  followed by Enter into the tab's shell, the same as `send_text = 'x\n'`.
+  A tab that gives its directory both ways, or has both `cmd` and
+  `send_text`, is a configuration error.
 
 ```lua
-local function build_tabs(entries)
-  local tabs = {}
-  local last_dir
-  for _, ent in ipairs(entries) do
-    local raw = ent[1]
-    local dir
-    if raw == nil then
-      dir = last_dir
-    elseif raw:sub(1, 2) == '~/' then
-      dir = wezterm.home_dir .. raw:sub(2)
-    elseif raw:sub(1, 1) == '/' then
-      dir = raw
-    else
-      dir = wezterm.home_dir .. '/' .. raw
-    end
-    last_dir = dir
-
-    local spawn = { cwd = dir }
-    if ent.cmd then
-      spawn.send_text = ent.cmd .. '\n'
-    end
-    table.insert(tabs, spawn)
-  end
-  return tabs
-end
-
 config.window_presets = {
   control_center = {
-    tabs = build_tabs({
-      { '~/Agentic/Skills' },
-      { '~/Agentic/Config' },
-      { '~/devel/live/typescript/site' },
-      { cmd = 'bun run dev --host' }, -- same cwd as the previous tab
-      {},                             -- plain shell, same cwd again
-    }),
+    tabs = {
+      { cwd = '~/Agentic/Skills' },
+      { cwd = '~/Agentic/Config' },
+      { cwd = '~/devel/live/typescript/site' },
+      { send_text = 'bun run dev --host\n' }, -- same cwd as the previous tab
+      {},                                     -- plain shell, same cwd again
+    },
   },
   wezterm = {
-    tabs = build_tabs({
-      { '~/devel/cloned/wezterm' },
+    tabs = {
+      { cwd = '~/devel/cloned/wezterm' },
       {},
       {},
-    }),
+    },
   },
 }
 

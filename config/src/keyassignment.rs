@@ -304,10 +304,121 @@ pub struct WindowPreset {
     /// The tabs to spawn in the window. The first entry creates the window
     /// itself; subsequent entries are added as additional tabs in order.
     /// An empty list is rejected at materialization time.
-    #[dynamic(default)]
+    /// A tab that omits `cwd` opens in the directory the previous tab was
+    /// given (after `~` expansion), whatever that tab runs and whichever
+    /// domain it uses; tabs before the first one that names a directory
+    /// keep the default directory.
+    /// Besides the full SpawnCommand form, a tab may give its directory as
+    /// its first positional entry, `{ '~/project' }`, and a line to run in
+    /// its shell as `cmd`, which is typed followed by Enter:
+    /// `{ '~/project', cmd = 'make watch' }`. Unlike `args`, which runs a
+    /// program in place of the shell, `cmd` leaves the shell running.
+    #[dynamic(default, try_from = "PresetTabs")]
     pub tabs: Vec<SpawnCommand>,
 }
 impl_lua_conversion_dynamic!(WindowPreset);
+
+/// The tabs of a window preset as written in the config, before the
+/// shorthand forms described on `WindowPreset::tabs` are resolved.
+struct PresetTabs(Vec<SpawnCommand>);
+
+impl From<PresetTabs> for Vec<SpawnCommand> {
+    fn from(tabs: PresetTabs) -> Self {
+        tabs.0
+    }
+}
+
+impl FromDynamic for PresetTabs {
+    fn from_dynamic(
+        value: &Value,
+        options: FromDynamicOptions,
+    ) -> Result<Self, wezterm_dynamic::Error> {
+        match value {
+            Value::Array(tabs) => Ok(Self(
+                tabs.iter()
+                    .map(|tab| preset_tab_from_dynamic(tab, options))
+                    .collect::<Result<_, _>>()?,
+            )),
+            other => Err(wezterm_dynamic::Error::NoConversion {
+                source_type: other.variant_name().to_string(),
+                dest_type: "window preset tabs",
+            }),
+        }
+    }
+}
+
+fn preset_tab_from_dynamic(
+    tab: &Value,
+    options: FromDynamicOptions,
+) -> Result<SpawnCommand, wezterm_dynamic::Error> {
+    let message = |text: &str| wezterm_dynamic::Error::Message(text.to_string());
+    let directory_entry = |entry: &Value| match entry {
+        Value::String(dir) => Ok(PathBuf::from(dir)),
+        _ => Err(message(
+            "the first entry of a window preset tab must be its directory, as a string",
+        )),
+    };
+
+    // `{ '~/x' }` alone is a plain Lua sequence, so it arrives as an array.
+    let fields = match tab {
+        Value::Array(entries) => {
+            return match entries.as_slice() {
+                [dir] => Ok(SpawnCommand {
+                    cwd: Some(directory_entry(dir)?),
+                    ..SpawnCommand::default()
+                }),
+                _ => Err(message(
+                    "a window preset tab takes at most one positional entry, its directory",
+                )),
+            };
+        }
+        Value::Object(fields) => fields,
+        other => return SpawnCommand::from_dynamic(other, options),
+    };
+
+    let mut rest: std::collections::BTreeMap<Value, Value> = fields
+        .iter()
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect();
+    let dir = match rest.remove(&Value::I64(1)) {
+        Some(entry) => Some(directory_entry(&entry)?),
+        None => None,
+    };
+    if rest
+        .keys()
+        .any(|key| matches!(key, Value::I64(_) | Value::U64(_)))
+    {
+        return Err(message(
+            "a window preset tab takes at most one positional entry, its directory",
+        ));
+    }
+    let cmd = match rest.remove(&Value::String("cmd".to_string())) {
+        Some(Value::String(cmd)) => Some(cmd),
+        Some(_) => return Err(message("`cmd` in a window preset tab must be a string")),
+        None => None,
+    };
+
+    let mut spawn = SpawnCommand::from_dynamic(&Value::Object(rest.into()), options)?;
+    if let Some(dir) = dir {
+        if spawn.cwd.is_some() {
+            return Err(message(
+                "a window preset tab gives its directory both as its first entry and as `cwd`; \
+                 keep one",
+            ));
+        }
+        spawn.cwd = Some(dir);
+    }
+    if let Some(cmd) = cmd {
+        if spawn.send_text.is_some() {
+            return Err(message(
+                "a window preset tab has both `cmd` and `send_text`; `cmd` types its text \
+                 followed by Enter, so keep one",
+            ));
+        }
+        spawn.send_text = Some(format!("{cmd}\n"));
+    }
+    Ok(spawn)
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, FromDynamic, ToDynamic)]
 pub enum PaneDirection {
@@ -777,3 +888,6 @@ pub struct KeyTables {
 pub struct KeyTableEntry {
     pub action: KeyAssignment,
 }
+
+#[cfg(test)]
+mod tests;
