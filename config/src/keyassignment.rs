@@ -199,6 +199,10 @@ pub struct SpawnCommand {
     /// current working directory of the wezterm process when
     /// it was launched, or for some domains it may be some
     /// other location appropriate to the domain.
+    /// In a tab of `config.window_presets`, a `cwd` of `~` or one that
+    /// starts with `~/` is expanded to the home directory of the process
+    /// that materializes the preset; other SpawnCommand consumers use the
+    /// path as written. See `docs/config/lua/config/window_presets.md`.
     pub cwd: Option<PathBuf>,
 
     /// Specifies a map of environment variables that should be set.
@@ -217,7 +221,7 @@ pub struct SpawnCommand {
     /// `args`. Currently only honored by `config.window_presets`
     /// materialization; other SpawnCommand consumers (key assignments,
     /// launch_menu, CLI spawn, etc.) ignore this field. Trailing newline is
-    /// not added automatically — include it explicitly if you want the shell
+    /// not added automatically; include it explicitly if you want the shell
     /// to execute the line.
     pub send_text: Option<String>,
 }

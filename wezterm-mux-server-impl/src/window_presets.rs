@@ -13,6 +13,7 @@ use mux::pane::Pane;
 use mux::window::{Window, WindowId};
 use mux::Mux;
 use portable_pty::CommandBuilder;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 /// Returns the status of every preset declared in the current configuration,
@@ -76,16 +77,18 @@ pub async fn materialize_window_preset(name: &str) -> anyhow::Result<Option<Wind
 
     let mux = Mux::get();
     let size = config::configuration().initial_size(0, None);
+    let directories = preset_tab_directories(&preset.tabs, &config::HOME_DIR);
 
     // Spawn the first tab; this implicitly creates the window, which
     // carries the preset marker from the start.
     let first = &preset.tabs[0];
+    let first_dir = directories[0].as_deref();
     let (_tab, pane, window_id) = mux
         .spawn_tab_or_window_with_preset(
             None,
             first.domain.clone(),
-            command_builder_for(first)?,
-            cwd_for(first),
+            command_builder_for(first, first_dir)?,
+            cwd_for(first_dir),
             size,
             None,
             mux.active_workspace(),
@@ -105,13 +108,14 @@ pub async fn materialize_window_preset(name: &str) -> anyhow::Result<Option<Wind
         .with_context(|| format!("send_text for first tab of window preset `{name}`"))?;
 
     // Subsequent tabs land in the same window.
-    for (idx, tab) in preset.tabs.iter().enumerate().skip(1) {
+    for (idx, (tab, dir)) in preset.tabs.iter().zip(&directories).enumerate().skip(1) {
+        let dir = dir.as_deref();
         let (_tab, pane, _window_id) = mux
             .spawn_tab_or_window(
                 Some(window_id),
                 tab.domain.clone(),
-                command_builder_for(tab)?,
-                cwd_for(tab),
+                command_builder_for(tab, dir)?,
+                cwd_for(dir),
                 size,
                 None,
                 mux.active_workspace(),
@@ -166,8 +170,13 @@ fn lookup_preset(name: &str) -> anyhow::Result<WindowPreset> {
         .ok_or_else(|| anyhow!("no window preset named `{name}`"))
 }
 
-fn command_builder_for(spawn: &SpawnCommand) -> anyhow::Result<Option<CommandBuilder>> {
-    if spawn.args.is_none() && spawn.cwd.is_none() && spawn.set_environment_variables.is_empty() {
+/// Build the command for one preset tab, run in `cwd` rather than in the
+/// tab's own `cwd` field, which `preset_tab_directories` has resolved.
+fn command_builder_for(
+    spawn: &SpawnCommand,
+    cwd: Option<&Path>,
+) -> anyhow::Result<Option<CommandBuilder>> {
+    if spawn.args.is_none() && cwd.is_none() && spawn.set_environment_variables.is_empty() {
         return Ok(None);
     }
 
@@ -185,18 +194,38 @@ fn command_builder_for(spawn: &SpawnCommand) -> anyhow::Result<Option<CommandBui
         builder.env(k, v);
     }
 
-    if let Some(cwd) = spawn.cwd.as_ref() {
+    if let Some(cwd) = cwd {
         builder.cwd(cwd);
     }
 
     Ok(Some(builder))
 }
 
-fn cwd_for(spawn: &config::keyassignment::SpawnCommand) -> Option<String> {
-    spawn
-        .cwd
-        .as_ref()
-        .and_then(|p| p.to_str().map(|s| s.to_string()))
+fn cwd_for(cwd: Option<&Path>) -> Option<String> {
+    cwd.and_then(|p| p.to_str().map(|s| s.to_string()))
+}
+
+/// The directory each tab of a preset opens in, in tab order; `None` leaves
+/// the choice to the domain, as for any other spawn.
+///
+/// A directory written as `~` or starting with `~/` is expanded against
+/// `home`, the home directory of the process that materializes the preset.
+/// Only preset materialization does this; other `SpawnCommand` consumers
+/// pass `cwd` through unchanged.
+fn preset_tab_directories(tabs: &[SpawnCommand], home: &Path) -> Vec<Option<PathBuf>> {
+    tabs.iter()
+        .map(|tab| tab.cwd.as_deref().map(|dir| expand_home(dir, home)))
+        .collect()
+}
+
+/// Expand a leading `~` component against `home`. `~user` forms are left as
+/// written: a preset has no use for another user's home directory.
+fn expand_home(dir: &Path, home: &Path) -> PathBuf {
+    match dir.strip_prefix("~") {
+        Ok(rest) if rest.as_os_str().is_empty() => home.to_path_buf(),
+        Ok(rest) => home.join(rest),
+        Err(_) => dir.to_path_buf(),
+    }
 }
 
 #[cfg(test)]
@@ -214,6 +243,23 @@ mod test {
 
     fn names(names: &[&str]) -> Vec<String> {
         names.iter().map(|n| n.to_string()).collect()
+    }
+
+    const HOME: &str = "/home/me";
+
+    fn tab_in(cwd: &str) -> SpawnCommand {
+        SpawnCommand {
+            cwd: Some(PathBuf::from(cwd)),
+            ..SpawnCommand::default()
+        }
+    }
+
+    fn directories_of(tabs: &[SpawnCommand]) -> Vec<Option<PathBuf>> {
+        preset_tab_directories(tabs, Path::new(HOME))
+    }
+
+    fn dir(path: &str) -> Option<PathBuf> {
+        Some(PathBuf::from(path))
     }
 
     #[test]
@@ -273,5 +319,37 @@ mod test {
 
         assert_eq!(find_preset_window(&markers, "control_center"), None);
         assert!(!preset_statuses(&names(&["control_center"]), &markers)[0].is_running);
+    }
+
+    #[test]
+    fn a_preset_tab_directory_starting_with_tilde_slash_opens_under_home() {
+        assert_eq!(
+            directories_of(&[tab_in("~/projects/veil")]),
+            vec![dir("/home/me/projects/veil")]
+        );
+    }
+
+    #[test]
+    fn a_preset_tab_directory_of_a_lone_tilde_opens_in_home() {
+        assert_eq!(
+            directories_of(&[tab_in("~"), tab_in("~/")]),
+            vec![dir(HOME), dir(HOME)]
+        );
+    }
+
+    #[test]
+    fn a_preset_tab_directory_naming_another_users_home_is_used_as_written() {
+        assert_eq!(
+            directories_of(&[tab_in("~other/projects"), tab_in("~other")]),
+            vec![dir("~other/projects"), dir("~other")]
+        );
+    }
+
+    #[test]
+    fn an_absolute_preset_tab_directory_is_used_as_written() {
+        assert_eq!(
+            directories_of(&[tab_in("/srv/projects/~/veil")]),
+            vec![dir("/srv/projects/~/veil")]
+        );
     }
 }

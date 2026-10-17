@@ -29,6 +29,10 @@ wezterm.action.SpawnCommandInNewWindow {
   -- If the current working directory cannot be inferred then it
   -- will typically fall back to using the home directory of
   -- the current user.
+  -- In a tab of `config.window_presets`, a `cwd` of `~` or one that
+  -- starts with `~/` is expanded to the home directory; other
+  -- SpawnCommand consumers use the path as written. See the
+  -- `window_presets` page for details.
   cwd = '/some/path',
 
   -- Sets additional environment variables in the environment for
