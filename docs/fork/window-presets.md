@@ -39,16 +39,16 @@ window; the rest become additional tabs in order. Presets give a
 config.window_presets = {
   control_center = {
     tabs = {
-      { cwd = '~/Agentic/Skills' },
-      { cwd = '~/Agentic/Config' },
-      { cwd = '~/devel/live/typescript/site' },
-      { send_text = 'bun run dev --host\n' }, -- same cwd as the previous tab
-      {},                                     -- plain shell, same cwd again
+      { '~/notes' },
+      { '~/dotfiles' },
+      { '~/projects/site' },
+      { cmd = 'bun run dev --host' }, -- same cwd as the previous tab
+      {},                             -- plain shell, same cwd again
     },
   },
   wezterm = {
     tabs = {
-      { cwd = '~/devel/cloned/wezterm' },
+      { '~/src/wezterm' },
       {},
       {},
     },
