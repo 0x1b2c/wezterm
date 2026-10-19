@@ -51,7 +51,7 @@ pub struct ClientPane {
     local_pane_id: PaneId,
     pub remote_pane_id: PaneId,
     pub remote_tab_id: TabId,
-    pub renderable: Mutex<RenderableState>,
+    pub renderable: Arc<Mutex<RenderableState>>,
     configured_palette: Mutex<ColorPalette>,
     palette: Mutex<ColorPalette>,
     application_palette: Mutex<bool>,
@@ -99,10 +99,6 @@ impl ClientPane {
         title: &str,
     ) -> Self {
         let local_pane_id = alloc_pane_id();
-        let writer = PaneWriter {
-            client: Arc::clone(client),
-            remote_pane_id,
-        };
 
         let mouse = Arc::new(Mutex::new(MouseState::new(
             remote_pane_id,
@@ -132,6 +128,13 @@ impl ClientPane {
                 fetch_limiter,
             )),
         };
+        let renderable = Arc::new(Mutex::new(render));
+
+        let writer = PaneWriter {
+            client: Arc::clone(client),
+            remote_pane_id,
+            renderable: Arc::clone(&renderable),
+        };
 
         let config = configuration();
         let palette: ColorPalette = config.resolved_palette.clone().into();
@@ -159,7 +162,7 @@ impl ClientPane {
             local_pane_id,
             remote_tab_id,
             application_palette: Mutex::new(false),
-            renderable: Mutex::new(render),
+            renderable,
             writer: Mutex::new(writer),
             configured_palette: Mutex::new(palette.clone()),
             palette: Mutex::new(palette),
@@ -822,18 +825,29 @@ impl ClientPane {
     }
 }
 
+/// Writes bytes to the remote pane without waiting for the server.
+///
+/// Every write is spawned like `key_down` and `send_paste`, so all input for
+/// the pane joins the client's send queue in the order it was typed: a
+/// write that waited for the server instead would overtake the keys still
+/// queued, and stall the GUI for a round trip on every kitty-encoded key.
+/// A write therefore returns before its bytes reach the server and cannot
+/// report a failure to deliver them.
 struct PaneWriter {
     client: Arc<ClientInner>,
     remote_pane_id: TabId,
+    renderable: Arc<Mutex<RenderableState>>,
 }
 
 impl std::io::Write for PaneWriter {
     fn write(&mut self, data: &[u8]) -> Result<usize, std::io::Error> {
-        promise::spawn::block_on(self.client.client.write_to_pane(WriteToPane {
+        let client = Arc::clone(&self.client);
+        let write = WriteToPane {
             pane_id: self.remote_pane_id,
             data: data.to_vec(),
-        }))
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{}", e)))?;
+        };
+        promise::spawn::spawn(async move { client.client.write_to_pane(write).await }).detach();
+        self.renderable.lock().inner.borrow_mut().update_last_send();
         Ok(data.len())
     }
 

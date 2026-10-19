@@ -100,7 +100,12 @@ user-facing symptom, are listed by branch name in the final section.
   protocol takes effect only when `enable_kitty_keyboard` is `true` for both
   the GUI and the mux server. Keys typed in the moment between a program
   switching the protocol on or off and the GUI hearing of it still use the
-  previous encoding.
+  previous encoding. Kitty-encoded keys are sent without waiting for the
+  mux server, in order with the other keys, pastes and text typed into the
+  pane; unlike legacy keys, they are not echoed ahead of the server on a slow
+  connection. For the same reason `pane:send_text` on a mux pane now returns
+  before the text reaches the mux server, and no longer reports a failure to
+  deliver it.
   *Branch: not yet split out from `master`.*
 
 ### One session shared by several machines
