@@ -33,3 +33,6 @@ wezterm-uds.workspace = true
 
 [target."cfg(windows)".dependencies]
 windows-sys = { workspace = true, features = ["Win32_Networking_WinSock"] }
+
+[dev-dependencies]
+parking_lot.workspace = true

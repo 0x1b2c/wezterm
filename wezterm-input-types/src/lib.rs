@@ -2032,6 +2032,7 @@ fn csi_u_encode(buf: &mut String, c: char, mods: Modifiers) {
 }
 
 bitflags::bitflags! {
+#[cfg_attr(feature="serde", derive(Serialize, Deserialize))]
 pub struct KittyKeyboardFlags: u16 {
     const NONE = 0;
     const DISAMBIGUATE_ESCAPE_CODES = 1;

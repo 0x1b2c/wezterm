@@ -85,6 +85,24 @@ user-facing symptom, are listed by branch name in the final section.
   around paste and full key capture still open.
   *Usage: [docs/fork/local-input.md](docs/fork/local-input.md). Branch: [local-input](https://github.com/0x1b2c/wezterm/compare/window-presets...local-input).*
 
+### Programs in a mux pane should get the keys they asked for
+
+- **In a mux pane, a program that turns on the kitty keyboard protocol stops
+  recognizing some keys, and Ctrl+Shift combinations cannot be typed at
+  all.** The mux server runs the pane's terminal, so it answered the
+  program's request and reported the protocol as on; but the GUI encodes the
+  keys, and it never learned the pane's keyboard mode, so it kept sending the
+  legacy encoding. A program that trusted the answer discarded legacy
+  sequences such as `ESC ^E` for Ctrl+Alt+E, and Shift+Enter arrived as a
+  plain Enter. The mux server now sends the pane's kitty keyboard flags to
+  its clients along with the rest of the pane's state, and the GUI encodes
+  keys for a mux pane with them, as it already did for a local pane. The
+  protocol takes effect only when `enable_kitty_keyboard` is `true` for both
+  the GUI and the mux server. Keys typed in the moment between a program
+  switching the protocol on or off and the GUI hearing of it still use the
+  previous encoding.
+  *Branch: not yet split out from `master`.*
+
 ### One session shared by several machines
 
 - **Returning to a machine after using the same mux session from another one

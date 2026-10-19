@@ -22,7 +22,8 @@ use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::ops::Range;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use termwiz::input::KeyEvent;
+use termwiz::escape::csi::KittyKeyboardFlags;
+use termwiz::input::{KeyEvent, KeyboardEncoding};
 use termwiz::surface::SequenceNo;
 use url::Url;
 use wezterm_dynamic::Value;
@@ -59,6 +60,10 @@ pub struct ClientPane {
     clipboard: Mutex<Option<Arc<dyn Clipboard>>>,
     mouse_grabbed: Mutex<bool>,
     alt_screen_active: Mutex<bool>,
+    /// The kitty keyboard flags the program in the remote pane has turned
+    /// on, replicated from the server's render changes. The GUI encodes
+    /// keys itself, and reads them through `get_keyboard_encoding`.
+    kitty_keyboard_flags: Mutex<Option<KittyKeyboardFlags>>,
     ignore_next_kill: Mutex<bool>,
     user_vars: Mutex<HashMap<String, String>>,
     config: Mutex<Option<Arc<dyn TerminalConfiguration>>>,
@@ -161,6 +166,7 @@ impl ClientPane {
             clipboard: Mutex::new(None),
             mouse_grabbed: Mutex::new(false),
             alt_screen_active: Mutex::new(false),
+            kitty_keyboard_flags: Mutex::new(None),
             ignore_next_kill: Mutex::new(false),
             unseen_output: Mutex::new(false),
             user_vars: Mutex::new(HashMap::new()),
@@ -178,6 +184,7 @@ impl ClientPane {
             Pdu::GetPaneRenderChangesResponse(mut delta) => {
                 *self.mouse_grabbed.lock() = delta.mouse_grabbed;
                 *self.alt_screen_active.lock() = delta.alt_screen_active;
+                *self.kitty_keyboard_flags.lock() = delta.kitty_keyboard_flags;
 
                 let bonus_lines = std::mem::take(&mut delta.bonus_lines);
                 let client = { Arc::clone(&self.renderable.lock().inner.borrow().client) };
@@ -648,6 +655,13 @@ impl Pane for ClientPane {
         *self.mouse_grabbed.lock()
     }
 
+    fn get_keyboard_encoding(&self) -> KeyboardEncoding {
+        match *self.kitty_keyboard_flags.lock() {
+            Some(flags) => KeyboardEncoding::Kitty(flags),
+            None => KeyboardEncoding::Xterm,
+        }
+    }
+
     fn is_alt_screen_active(&self) -> bool {
         *self.alt_screen_active.lock()
     }
@@ -827,3 +841,6 @@ impl std::io::Write for PaneWriter {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests;

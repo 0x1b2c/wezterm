@@ -30,6 +30,7 @@ use std::io::Cursor;
 use std::ops::Range;
 use std::path::PathBuf;
 use std::sync::Arc;
+use termwiz::escape::csi::KittyKeyboardFlags;
 use termwiz::hyperlink::Hyperlink;
 use termwiz::image::{ImageData, TextureCoordinate};
 use termwiz::surface::{Line, SequenceNo};
@@ -1009,6 +1010,10 @@ pub struct GetPaneRenderChangesResponse {
 
     pub input_serial: Option<InputSerial>,
     pub seqno: SequenceNo,
+    /// The kitty keyboard flags the program in the pane has turned on, or
+    /// `None` while it uses the legacy encoding. The GUI encodes keys
+    /// itself, so it needs this to send them the way the program asked for.
+    pub kitty_keyboard_flags: Option<KittyKeyboardFlags>,
 }
 
 #[derive(Deserialize, Serialize, PartialEq, Debug)]
@@ -1289,6 +1294,38 @@ mod test {
             tab_titles: vec![],
             window_titles: HashMap::new(),
             window_presets,
+        });
+
+        let mut encoded = Vec::new();
+        response.encode(&mut encoded, 0x40).unwrap();
+
+        assert_eq!(
+            Pdu::decode(encoded.as_slice()).unwrap(),
+            DecodedPdu {
+                serial: 0x40,
+                pdu: response,
+            }
+        );
+    }
+
+    #[test]
+    fn render_changes_with_kitty_flags_survive_the_codec() {
+        let response = Pdu::GetPaneRenderChangesResponse(GetPaneRenderChangesResponse {
+            pane_id: 3,
+            mouse_grabbed: false,
+            alt_screen_active: false,
+            cursor_position: StableCursorPosition::default(),
+            dimensions: RenderableDimensions::default(),
+            dirty_lines: vec![],
+            title: String::new(),
+            working_dir: None,
+            bonus_lines: SerializedLines::default(),
+            input_serial: None,
+            seqno: 0,
+            kitty_keyboard_flags: Some(
+                KittyKeyboardFlags::DISAMBIGUATE_ESCAPE_CODES
+                    | KittyKeyboardFlags::REPORT_EVENT_TYPES,
+            ),
         });
 
         let mut encoded = Vec::new();

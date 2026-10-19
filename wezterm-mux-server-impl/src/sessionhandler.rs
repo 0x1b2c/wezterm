@@ -12,6 +12,8 @@ use promise::spawn::spawn_into_main_thread;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
+use termwiz::escape::csi::KittyKeyboardFlags;
+use termwiz::input::KeyboardEncoding;
 use termwiz::surface::SequenceNo;
 use url::Url;
 use wezterm_term::terminal::Alert;
@@ -43,6 +45,7 @@ pub(crate) struct PerPane {
     dimensions: RenderableDimensions,
     mouse_grabbed: bool,
     alt_screen_active: bool,
+    kitty_keyboard_flags: Option<KittyKeyboardFlags>,
     sent_initial_palette: bool,
     seqno: SequenceNo,
     config_generation: usize,
@@ -63,6 +66,11 @@ impl PerPane {
 
         let alt_screen_active = pane.is_alt_screen_active();
         if alt_screen_active != self.alt_screen_active {
+            changed = true;
+        }
+
+        let kitty_keyboard_flags = kitty_keyboard_flags(pane);
+        if kitty_keyboard_flags != self.kitty_keyboard_flags {
             changed = true;
         }
 
@@ -133,6 +141,7 @@ impl PerPane {
         self.dimensions = dims;
         self.mouse_grabbed = mouse_grabbed;
         self.alt_screen_active = alt_screen_active;
+        self.kitty_keyboard_flags = kitty_keyboard_flags;
 
         let bonus_lines = bonus_lines.into();
         Some(GetPaneRenderChangesResponse {
@@ -147,7 +156,19 @@ impl PerPane {
             working_dir: working_dir.map(Into::into),
             input_serial: force_with_input_serial,
             seqno: self.seqno,
+            kitty_keyboard_flags,
         })
+    }
+}
+
+/// The kitty keyboard flags a mux client should encode keys with, if any.
+/// The client encodes keys itself only for the kitty protocol; any other
+/// encoding, Win32 included, reaches it as the legacy one, so it keeps
+/// sending those keys to the server to encode.
+fn kitty_keyboard_flags(pane: &Arc<dyn Pane>) -> Option<KittyKeyboardFlags> {
+    match pane.get_keyboard_encoding() {
+        KeyboardEncoding::Kitty(flags) => Some(flags),
+        _ => None,
     }
 }
 
@@ -1232,3 +1253,6 @@ async fn move_pane(
         window_id,
     }))
 }
+
+#[cfg(test)]
+mod tests;
