@@ -1,3 +1,5 @@
+Chinese: [FORK.zh-CN.md](FORK.zh-CN.md)
+
 # FORK.md
 
 A personal fork of [WezTerm](https://github.com/wezterm/wezterm), maintained by

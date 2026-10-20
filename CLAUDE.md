@@ -4,7 +4,7 @@ A personal fork of WezTerm that carries a stack of patches on `master`; `FORK.md
 
 ## Working rules
 
-- Everything committed to this repository is written in English.
+- Everything committed to this repository is written in English, with one exception: `FORK.zh-CN.md` is the Chinese edition of `FORK.md`. Any commit that changes `FORK.md` also changes `FORK.zh-CN.md`, so that the two say the same thing.
 - Fork features are documented in `FORK.md` and `docs/fork/`, never in upstream's `docs/changelog.md`.
 - Committed files never name local machines, user names, or local paths; machine-specific recipes belong in the uncommitted `justfile.local`.
 - A change to a mux PDU leaves the codec version alone in its own commit. `CODEC_VERSION` (`0x1b2c_UUNN`) combines upstream's own codec version, `UPSTREAM_CODEC_VERSION`, which the commit at the base of the stack keeps and which takes upstream's new number whenever an upstream sync conflicts on it, with the fork's protocol revision, `FORK_PROTOCOL_REVISION`. Between releases, each protocol change adds a `fixup!` commit for the stack's revision commit that raises the fork's revision by one; a release moves the revision commit to the top of the stack, squashes its fixups into it, and sets the revision to the number of patches that change the protocol. The comments on these constants in `codec/src/lib.rs` explain why.

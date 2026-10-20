@@ -4,7 +4,7 @@
 > WezTerm's multiplexer over SSH nicer to live in: it fixes GUI freezes and lag
 > under mux load, adds Window Presets to declare window layouts once and spawn
 > them on demand, and Local Input Mode to keep typing responsive on
-> high-latency links. See [FORK.md](FORK.md) for the full list of problems
+> high-latency links. See [FORK.md](FORK.md) ([中文](FORK.zh-CN.md)) for the full list of problems
 > solved and build instructions. The rest of this README is unchanged from
 > upstream WezTerm.
 
