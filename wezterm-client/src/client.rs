@@ -66,9 +66,9 @@ pub struct Client {
      which is not compatible with our version \n\
      {} (codec version {}).",
     version,
-    codec_vers,
+    format_codec_version(*codec_vers),
     config::wezterm_version(),
-    CODEC_VERSION
+    format_codec_version(CODEC_VERSION)
 )]
 pub struct IncompatibleVersionError {
     pub version: String,
@@ -1216,7 +1216,7 @@ impl Client {
                 log::trace!(
                     "Server version is {} (codec version {})",
                     info.version_string,
-                    info.codec_vers
+                    format_codec_version(info.codec_vers)
                 );
                 self.set_client_id(SetClientId {
                     client_id: self.client_id.clone(),
@@ -1463,37 +1463,4 @@ impl Client {
 }
 
 #[cfg(test)]
-mod test {
-    use super::*;
-    use std::time::Instant;
-    use wezterm_uds::UnixListener;
-
-    #[test]
-    fn a_just_spawned_server_that_starts_listening_after_a_few_seconds_is_still_reached() {
-        let path = crate::test_socket_path("slow-start");
-        let listen_path = path.clone();
-        let (client_done, server_may_stop) = std::sync::mpsc::channel::<()>();
-        let server = thread::spawn(move || {
-            thread::sleep(Duration::from_secs(3));
-            let listener = UnixListener::bind(&listen_path).unwrap();
-            // A connection completes from the backlog without an accept. The
-            // listener stays up until the client has finished retrying, so a
-            // retry delayed by a loaded machine still finds it.
-            let _ = server_may_stop.recv_timeout(Duration::from_secs(30));
-            drop(listener);
-        });
-
-        let started = Instant::now();
-        let result = unix_connect_with_retry(&UnixTarget::Socket(path.clone()), true, None);
-        let elapsed = started.elapsed();
-
-        let _ = client_done.send(());
-        server.join().unwrap();
-        let _ = std::fs::remove_file(&path);
-        assert!(
-            result.is_ok(),
-            "gave up after {elapsed:?}: {:#}",
-            result.err().unwrap()
-        );
-    }
-}
+mod tests;

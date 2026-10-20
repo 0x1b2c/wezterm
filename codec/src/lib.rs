@@ -483,6 +483,18 @@ pub const FORK_PROTOCOL_REVISION: usize = 0;
 // Each part of `CODEC_VERSION` has one byte.
 const _: () = assert!(UPSTREAM_CODEC_VERSION < 0x100 && FORK_PROTOCOL_REVISION < 0x100);
 
+/// Shows a codec version the way `CODEC_VERSION` is written, `0x1b2c_UUNN`,
+/// so that its three parts can be read off at a glance: the fork's name,
+/// upstream's codec version and the fork's protocol revision. An upstream
+/// build shows as `0x0000_00UU`.
+pub fn format_codec_version(codec_version: usize) -> String {
+    format!(
+        "0x{:04x}_{:04x}",
+        codec_version >> 16,
+        codec_version & 0xffff
+    )
+}
+
 // Defines the Pdu enum.
 // Each struct has an explicit identifying number.
 // This allows removal of obsolete structs,
@@ -1250,6 +1262,12 @@ pub struct GetImageCellResponse {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[test]
+    fn a_codec_version_is_shown_as_its_two_halves_in_hex() {
+        assert_eq!(format_codec_version(0x1b2c_0001), "0x1b2c_0001");
+        assert_eq!(format_codec_version(45), "0x0000_002d");
+    }
 
     #[test]
     fn test_frame() {
