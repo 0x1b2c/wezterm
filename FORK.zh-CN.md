@@ -2,83 +2,89 @@ English: [FORK.md](FORK.md) (the English edition is authoritative)
 
 # FORK.md
 
-这是 [WezTerm](https://github.com/wezterm/wezterm) 的个人 fork，由 [0x1b2c](https://github.com/0x1b2c) 维护。
+这是 [WezTerm](https://github.com/wezterm/wezterm) 的一个 fork，由 [0x1b2c](https://github.com/0x1b2c) 维护。
 
 ## 概述
 
-这是一个个人 fork，不是下游发行版：不更换品牌，也无意成为一个独立的产品。它会发布带版本号的 release，提供预编译的软件包和一个 Homebrew tap，因此无需自行构建即可安装（见[安装](#安装)）。它在上游 WezTerm 的 `main` 之上带有一组 patch：这些是日常使用中的修复与功能，涉及延迟、multiplexer 的正确性和工作流程的便利性，上游尚未提供。
+它不是下游发行版：不更换品牌，也不打算成为独立的产品。它会发布带版本号的 release，提供预编译的软件包和一个 Homebrew tap，因此无需自行构建即可安装（见[安装](#安装)）。它在上游 WezTerm 的 `main` 之上带有一组 patch：这些是日常使用中的修复与功能，涉及延迟、multiplexer 的正确性和工作流程的便利性，上游尚未提供。
 
 每个功能位于各自的分支上，`master` 整合整组 patch。其中一个 patch 已提交给上游（见下文），其余仅存在于本 fork。除此之外的一切与上游保持一致。WezTerm 的一般用法见 <https://wezterm.org/>。
 
 ## 这个 fork 解决的问题
 
-这些 patch 按主题分组，每一项都源于日常使用中的一个实际困扰，其中大多数围绕 WezTerm 经 SSH 使用的 multiplexer。每个条目先说明问题，实现修复的分支链接放在末尾。一个条目对应一个分支；分支内的各个 commit 是一个整体，这里不逐个列出。没有用户可见症状的构建与开发体验类 patch，按分支名列在最后一节。
+这些 patch 按主题分组，每一项都源于日常使用中的一个实际困扰，其中大多数与经 SSH 使用 WezTerm 的 multiplexer 有关。每个条目先说明问题，再说明装上本 fork 之后有什么变化、使用时需要知道什么；条目末尾链接到承载该 patch 的分支，修复的具体做法见各分支的 commit。构建与开发体验方面的 patch 不改变用户看到的行为，按分支名列在最后一节。
 
 ### 在 mux 负载下，GUI 冻结或严重卡顿
 
-- **重新连接打开了大量 tab 的 mux server 时，GUI 冻结。** mux 通道上的一次缓慢写入可能阻塞读取路径，使整个 session 死锁。修复方法是把 mux client 与 server 的分发拆成相互独立的 reader 与 writer task，通知则放在单独的 task 中处理。
+- **重新连接打开了大量 tab 的 mux server 时，GUI 冻结。** 现在打开几个窗口、共约五十个 tab 时，重新连接也不会冻结。
   *分支：[mux-deadlock-fix](https://github.com/0x1b2c/wezterm/compare/main...mux-deadlock-fix)，已作为 [PR #7771](https://github.com/wezterm/wezterm/pull/7771) 提交给上游。*
 
-- **打开了大量 tab 时调整窗口大小，GUI 冻结。** 每个 `TabResized` 事件都会触发对所有 pane 的完整重新同步，代价为 O(n²)，使界面卡死。修复方法是跳过多余的重新同步。
+- **打开了大量 tab 时调整窗口大小，GUI 冻结。** 现在打开几个窗口、共约五十个 tab 时，调整窗口大小，界面也能及时响应。
   *分支：[skip-resync-on-tab-resized](https://github.com/0x1b2c/wezterm/compare/ssh-proxy-error-msg...skip-resync-on-tab-resized)。*
 
-- **程序快速更新终端标题时，tab 栏出现卡顿。** 频繁的 OSC 标题更新使每次更新都重新运行 `format-tab-title` 的整套处理，拖垮了渲染循环。修复方法是缓存这部分工作并在可能时直接跳过。
-  *分支：[tab-title-perf](https://github.com/0x1b2c/wezterm/compare/objc-cargo-clippy-lint...tab-title-perf)。*
+- **程序频繁更新终端标题时，tab 栏出现卡顿。** 即使 Codex 这类程序每秒改写标题许多次，tab 栏也能保持流畅。一个程序在五分之一秒内设置三次以上标题时，它的 tab 直接显示程序设置的标题，不再调用 `format-tab-title` 处理函数，直到标题停止变化满一秒为止。
+  *分支：[tab-title-perf](https://github.com/0x1b2c/wezterm/compare/build-tooling...tab-title-perf)。*
 
-- **按键手感迟滞，因为渲染要等到下一个预定的帧。** 修复方法是在按键之后立即触发一次渲染轮询，降低感知到的输入延迟。
+- **按键反应迟缓。** 现在输入的字符会立即显示，不必等到下一个预定的帧。
   *分支：[keystroke-render-poll](https://github.com/0x1b2c/wezterm/compare/fork-base...keystroke-render-poll)。*
 
 ### 一次声明窗口布局，按需生成
 
-- **每次都手动建立相同的窗口和 tab，十分繁琐。** 本 fork 增加了 Window Presets：在配置中声明窗口布局，再通过 launcher 的命令行参数按需生成和关闭，使一组已知可用的工作环境始终只差一条命令。它还包括 `SpawnCommand` 的 `send_text` 字段，使 preset 中的 tab 可以在默认 shell 中自动运行一条命令。preset tab 的 `cwd` 可以以 `~/` 开头；省略 `cwd` 的 tab 会在前一个 tab 的目录中打开，因此一个项目的 preset 只需写一次目录。tab 也可以把第一个条目写成目录，并用 `cmd` 给出要在其 shell 中运行的一行命令。preset 窗口的标题以 `[<preset name>]` 开头，便于外部工具识别。
+- **每次都手动建立相同的窗口和 tab，十分繁琐。** 本 fork 增加了 Window Presets：在配置中声明窗口布局，再从 launcher 按需生成或关闭，配置好的整套窗口随时只需一条命令即可打开；`startup_windows` 可以在 mux server 启动时打开指定的 preset。每个 tab 可以指定目录（可以以 `~/` 开头）以及要在其 shell 中运行的一行命令；不指定目录的 tab 在前一个 tab 的目录中打开，因此一个项目的 preset 只需写一次目录。简写 `{ '~/project', cmd = 'make watch' }` 等同于 `{ cwd = '~/project', send_text = 'make watch\n' }`。preset 窗口的标题以 `[<preset name>]` 开头，便于外部工具识别。preset 由 mux server 打开，因此这些设置要在 mux server 也运行本 fork 时才会生效。
   *用法：[docs/fork/window-presets.md](docs/fork/window-presets.md)。分支：[window-presets](https://github.com/0x1b2c/wezterm/compare/session-experience...window-presets)。*
 
-- **没有一个能一次关闭整个 mux 窗口的 keybinding action**，而重置布局需要它。新增了一个 Lua action，以原子方式结束一个 mux 窗口。
+- **没有一个能一次关闭整个 mux 窗口的 keybinding action**，而重置布局需要它。现在可以用 `wezterm.mux.kill_window(mux_window)` 一步关闭一个 mux 窗口及其全部 tab，推荐绑定到 `Cmd+Shift+W`：
+
+  ```lua
+  { key = 'w', mods = 'CMD|SHIFT', action = wezterm.action_callback(function(window)
+    wezterm.mux.kill_window(window:mux_window())
+  end) },
+  ```
   *分支：[lua-kill-window](https://github.com/0x1b2c/wezterm/compare/tab-title-perf...lua-kill-window)。*
 
-- **关闭一个窗口时，可能会断开其他窗口仍在使用的 mux domain。** 修复方法是只要还有窗口在使用该 domain，就保持它的连接。
+- **关闭一个窗口时，可能会 detach 其他窗口仍在使用的 mux domain。** 现在只要还有窗口在使用该 domain，它就保持 attach。
   *分支：[session-experience](https://github.com/0x1b2c/wezterm/compare/lua-kill-window...session-experience)。*
 
 ### 在慢速连接上输入十分痛苦
 
-- **在高延迟的连接上，每次按键都要经过一次完整的往返，字符才会出现在屏幕上。** 当 mux server 运行在一台已经休眠的 Mac 上时，情况尤其糟糕：macOS 的电源管理会限制休眠中的机器，每次往返从几毫秒拉长到几秒。本 fork 增加了 Local Input Mode，这是一种按 pane 设置的输入模式，在 client 端缓冲按键，只在提交时才把整行送往 PTY。它是在网络不佳时提供最低限度可用环境的便利工具，并不是完美的行编辑器。它是这组 patch 中最新的一个，在粘贴和完整按键捕获方面还有已知的边界情况尚未解决。
+- **在高延迟的连接上，每次按键都要经过一次完整的往返，字符才会出现在屏幕上。** 当 mux server 运行在一台已经休眠的 Mac 上时情况尤其糟糕，每次往返会从几毫秒拉长到几秒。Local Input Mode 按 pane 开启，开启后可以在本地输入并编辑一整行，提交时才把这一行发送出去。它的用途是在网络不佳时维持一个最低限度可用的环境，并不是一个完整的行编辑器。已知的限制有：持续重绘输入区域的程序（例如 Claude Code）会覆盖本地显示的文字；`Cmd+V` 粘贴的内容直接发送给远程程序；在本地输入期间，Tab 补全、历史搜索等 readline 功能不可用；向普通 shell 提交多行文字时，shell 会逐行执行。用法说明中有这些限制的详细描述。
   *用法：[docs/fork/local-input.md](docs/fork/local-input.md)。分支：[local-input](https://github.com/0x1b2c/wezterm/compare/window-presets...local-input)。*
 
-### mux pane 中的程序应当收到它们所请求的按键
+### 完整支持 Kitty 键盘协议
 
-- **在 mux pane 中，开启 kitty keyboard protocol 的程序无法识别某些按键，Ctrl+Shift 组合键则完全无法输入。** pane 的终端运行在 mux server 上，所以由它应答程序的请求，并报告该协议已开启；但按键是由 GUI 编码的，而 GUI 从未得知 pane 的键盘模式，因此一直发送传统编码。信任了这个应答的程序会丢弃传统序列，例如 Ctrl+Alt+E 的 `ESC ^E`，Shift+Enter 到达时则变成一次普通的 Enter。现在，mux server 会把 pane 的 kitty keyboard flags 连同 pane 的其余状态一起发送给它的 client，GUI 据此为 mux pane 编码按键，与它对本地 pane 的做法一致。只有当 GUI 与 mux server 两端的 `enable_kitty_keyboard` 都为 `true` 时，该协议才会生效。程序开启或关闭该协议，到 GUI 得知这一变化之间的短暂时刻里输入的按键，仍使用之前的编码。与传统按键不同，kitty 编码的按键在慢速连接上不会先于 server 在本地回显。它们不等待 mux server 的响应就直接发送，并与输入到该 pane 的其他按键、粘贴内容和文本保持顺序；出于同样的原因，mux pane 上的 `pane:send_text` 现在会在文本到达 mux server 之前返回，不再报告投递失败。
+- **程序运行在 mux server 中时（例如把默认 domain 设为一个 unix domain，或者通过 SSH domain 连接到远程机器），一旦开启 Kitty 键盘协议就会漏掉按键，Ctrl+Shift 组合键则完全无法输入。** 上游 WezTerm 只在不经过 mux server 时才完整支持这个协议；本 fork 让运行在 mux server 中的程序同样可以使用完整的 Kitty 键盘协议：Ctrl+Shift 组合键、与 Enter 区分开的 Shift+Enter、与 Tab 区分开的 Ctrl+I，以及 Ctrl+Alt 加字母的快捷键，都能送达程序。使用条件是 GUI 与 mux server 两端的配置中 `enable_kitty_keyboard` 都为 `true`，并且两端都运行 protocol 版本为 46.3 或更新的本 fork（见[版本号](#版本号)）。在慢速连接上，以 Kitty 键盘协议编码发送的按键不会先于 server 在本地回显。对运行在 mux server 中的 pane 调用 `pane:send_text` 时，它会在文本到达 mux server 之前返回，不再报告投递失败。
   *分支：[kitty-keyboard](https://github.com/0x1b2c/wezterm/compare/mux-startup...kitty-keyboard)。*
 
 ### 多台机器共享同一个 session
 
-- **在另一台机器上使用同一个 mux session 之后，回到原来的机器，其窗口里显示的是按另一台机器排版的内容。** 每个 pane 在 mux server 上只有一个尺寸，由最后一个调整它的 client 决定；而 client 只在自己的窗口尺寸变化时才报告尺寸，所以内容会超出较小的窗口，或者让较大的窗口只填满一半，直到手动调整窗口大小。现在，尺寸跟随最近使用的那个 client，与 tmux 的 `window-size latest` 相同：当窗口获得焦点、收到按键、点击或滚动，或者切换 tab 时，如果各 pane 还不是它的尺寸，它就为自己当前的 tab 报告自己的尺寸。当两台机器同时显示这个 session 时，没有在使用的那一台显示的是另一台的尺寸，直到它再次被使用。
+- **在另一台机器上使用同一个 mux session 之后，回到原来的机器，窗口里显示的仍是按另一台机器的屏幕大小排版的内容。** 现在 pane 的尺寸跟随正在使用的那台机器，与 tmux 的 `window-size latest` 相同：窗口一旦获得焦点、收到按键、点击或滚动，或者切换 tab，其中的 pane 就会调整到适合这个窗口的尺寸。两台机器同时显示这个 session 时，没有在使用的那一台显示另一台的尺寸，直到再次使用它为止。
 
-- **每个 pane 里的 ssh 突然找不到自己的密钥，并要求输入密钥的 passphrase。** pane 通过 mux server 维护的一条链接访问 ssh-agent，这条链接始终指向最近活跃的 client 的 agent。从某个 pane 内部启动的 GUI 会继承该 pane 的 `SSH_AUTH_SOCK`，也就是这条链接本身，并把它当作自己的 agent 报告；mux server 随后把链接指向了它自己，于是所有 pane 都失去了 agent，直到 session 重新启动。现在，mux server 会拒绝直接或经由其他链接绕回自身链接的目标，保留原来可用的目标，并记录 `[fix:agent-self-link]` 日志。
+- **每个 pane 里的 ssh 突然找不到密钥，并要求输入密钥的 passphrase。** 这种情况发生在从某个 pane 内部启动 WezTerm GUI 之后。现在以这种方式启动 GUI，不会再使其他 pane 失去 ssh-agent。
   *分支：[shared-session](https://github.com/0x1b2c/wezterm/compare/windows-cross-build...shared-session)。*
 
 ### mux server 应当可靠地启动
 
-- **登录之后不久，GUI 以 "Connection refused" 退出，并留下一个没有窗口的 mux server 在运行。** 找不到 mux server 的 GUI 会自己启动一个，然后只给它大约两秒半的时间开始监听。刚登录时系统很忙，server 的启动加上它为了转入 daemon 而做的 re-exec 可能需要好几秒，于是 GUI 放弃并退出，而它启动的 server 过一会儿才就绪。现在，client 对自己刚启动的 server 会持续尝试连接，最长 15 秒。
+- **mux server 启动较慢时，GUI 以 "Connection refused" 退出，并留下一个没有窗口的 mux server 在运行。** 现在 GUI 会为自己刚启动的 mux server 最多等待 15 秒，即使 mux server 启动得慢，GUI 也能正常打开。
   *分支：[mux-startup](https://github.com/0x1b2c/wezterm/compare/ssh-config-include...mux-startup)。*
 
 ### WezTerm 不应让 macOS 在后台忙个不停
 
-- **在 macOS 26 及更高版本上，Spotlight 的索引服务每天因 WezTerm 写入数 GB 数据。** AppKit 会把一个应用的每个窗口都索引到 Spotlight，并且在任何窗口的标题变化时重新提交全部窗口，没有任何合并；终端的标题每秒变化好几次（shell 目录、程序标题、进度字符），而 Spotlight 会拒绝其中的每一次更新。现在，WezTerm 在启动时通过 AppKit 未公开的 `NSEnableWindowTabIndexing` 默认值关闭这项索引，并以注册默认值的方式设置，因此仍可用 `defaults write org.1b2c.wezterm NSEnableWindowTabIndexing -bool true` 将其重新打开。
+- **在 macOS 26 及更高版本上，Spotlight 的索引服务每天因 WezTerm 写入数 GB 数据。** 终端的窗口标题每秒变化好几次，而 macOS 每次都会把所有窗口重新提交给 Spotlight。现在 WezTerm 关闭了这项索引。如需重新打开，运行 `defaults write org.1b2c.wezterm NSEnableWindowTabIndexing -bool true`。
   *分支：[spotlight-window-titles](https://github.com/0x1b2c/wezterm/compare/shared-session...spotlight-window-titles)。*
 
 ### SSH domain 应当像 `ssh` 一样查找主机
 
-- **对于普通 `ssh` 能连上的主机，ssh domain 却报错 "failed to lookup address information"。** 这台主机定义在由 `Include ~/.ssh/config.local` 引入的文件中。WezTerm 不展开 `Include` 参数中的 `~`，并且把相对路径参数相对于包含该 `Include` 的文件所在目录解析，所以被引入的文件从未被读取，别名被当作字面的主机名。现在 WezTerm 遵循 `ssh_config(5)`：开头的 `~` 表示 home 目录；相对路径在用户配置文件中相对于 `~/.ssh` 解析，在系统配置文件中相对于 `/etc/ssh` 解析，无论 include 嵌套多深。glob 仍然有效。
+- **对于普通 `ssh` 能连上的主机，ssh domain 却报错 "failed to lookup address information"**，原因是这台主机定义在通过 `Include` 引入的文件中，例如 `Include ~/.ssh/config.local`。现在 ssh domain 按 `ssh` 的方式读取被引入的文件（`ssh_config(5)`）：开头的 `~` 表示 home 目录；相对路径在用户配置中相对于 `~/.ssh` 查找，在系统配置中相对于 `/etc/ssh` 查找，无论 include 嵌套多深。glob 仍然有效。
   *分支：[ssh-config-include](https://github.com/0x1b2c/wezterm/compare/spotlight-window-titles...ssh-config-include)。*
 
 ### 失败应当自己说明原因
 
-- **远程 SSH proxy command 失败时，得到的只是一条含糊的连接错误。** 修复方法是给出一条清楚的错误信息，说明究竟是什么失败了。
+- **远程 SSH proxy command 失败时，得到的只是一条含糊的连接错误。** 现在错误信息会说明究竟是什么失败了。
   *分支：[ssh-proxy-error-msg](https://github.com/0x1b2c/wezterm/compare/keystroke-render-poll...ssh-proxy-error-msg)。*
 
 ### 构建与开发体验
 
-这些 patch 没有用户可见的症状，为完整起见列在这里。
+这些 patch 不改变用户看到的行为，为完整起见列在这里。
 
 - **[fork-base](https://github.com/0x1b2c/wezterm/compare/mux-deadlock-fix...fork-base)**
   本 fork 自己的文档（本文件、`docs/fork/`、README 的横幅），给 coding agent 的说明，以及本 fork 的 mux protocol 版本范围。它位于 `mux-deadlock-fix` 的正上方，而 `mux-deadlock-fix` 为了它的 pull request 直接建立在上游之上；这样它之上的每个功能分支都可以在引入功能的同一个 commit 中更新本 fork 的文档。
@@ -93,16 +99,17 @@ English: [FORK.md](FORK.md) (the English edition is authoritative)
 - **[objc-cargo-clippy-lint](https://github.com/0x1b2c/wezterm/compare/vendor-openssl-musl...objc-cargo-clippy-lint)**
   在 workspace 的 lint 配置中把 `objc` crate 的 `cargo-clippy` cfg 加入白名单，以消除多余的警告。
 
+- **[build-tooling](https://github.com/0x1b2c/wezterm/compare/objc-cargo-clippy-lint...build-tooling)**
+  加入带有构建、打包与签名 recipe 的 `justfile`，CI 打包 macOS 版本时也用它签名；并屏蔽 macOS 构建为空目标文件输出的「has no symbols」警告。
+
 - **[macos-bundle-identity](https://github.com/0x1b2c/wezterm/compare/local-input...macos-bundle-identity)**
-  加入带有构建与打包 recipe 的 `justfile`，并让 macOS 构建使用本 fork 自己的 bundle identifier 和稳定的 ad-hoc 签名（见 [Bundle identifier 与签名](#bundle-identifier-与签名)）。
+  让 macOS 构建使用本 fork 自己的 bundle identifier 和稳定的 ad-hoc 签名（见 [Bundle identifier 与签名](#bundle-identifier-与签名)）。
 
 - **[windows-cross-build](https://github.com/0x1b2c/wezterm/compare/macos-bundle-identity...windows-cross-build)**
   用一条命令交叉编译并打包 Windows（MinGW）构建，并把与特定机器相关的部署 recipe 移入不提交的 `justfile.local`。
 
 - **[fork-release](https://github.com/0x1b2c/wezterm/compare/kitty-keyboard...fork-release)**
   发布相关的部分：`wezterm --version` 说明所属的 fork release 与所用的 mux protocol，本机构建报告它所源自的 release，GitHub Actions 构建各平台的软件包并在每个 fork release tag 上发布 release，以及这些 release 的安装说明（见[安装](#安装)与[版本号](#版本号)）。
-
-除上述分支之外，这组 patch 还带有少量标记为 `[local]` 的 commit：针对 macOS `visibleFrame` 窗口几何的绕过方法、为定位崩溃而加的日志标记，以及对构建噪音的抑制。这些是实验性的或与特定环境相关的尝试，不是面向用户的功能，因此不逐个说明。
 
 ## 安装
 
@@ -134,7 +141,7 @@ xattr -cr WezTerm.app
 
 ## 构建
 
-本 fork 的构建使用自己范围内的 mux protocol 编号（`0x1b2c_UUNN`，其中 `UU` 是上游的 protocol 版本，`NN` 是本 fork 的 revision），所以 fork 构建与上游 WezTerm 的 mux server 会互相拒绝连接，而不会交换双方都无法解码的消息。mux 连接的两端请运行同一个 fork 构建。
+本 fork 修改了 mux protocol，因此它的构建与上游 WezTerm 的构建无法互通。本 fork 在自己的范围内为 protocol 版本编号（`0x1b2c_UUNN`，其中 `UU` 是上游的 protocol 版本，`NN` 是本 fork 的 revision），双方因此都能认出对方不兼容，直接拒绝连接并给出明确的提示，而不是连上之后出错。mux 连接的两端请运行 protocol 版本相同的 fork 构建。
 
 上游提供了 CI 配置，但没有简单的本地构建脚本。为此，本 fork 在 repo 根目录加入了一个 [`justfile`](justfile)。运行 `just` 可以列出可用的 recipe。
 
@@ -152,7 +159,7 @@ xattr -cr WezTerm.app
 
 ### Bundle identifier 与签名
 
-本 fork 的 macOS 构建使用 bundle identifier `org.1b2c.wezterm`，而不是上游的 `com.github.wez.wezterm`。原因在于隐私权限。这些构建使用 ad-hoc 签名，没有开发者证书，而 macOS 把隐私授权（Accessibility、Full Disk Access 等）绑定在应用的 designated requirement 上。普通的 ad-hoc 签名把这个 requirement 绑定在二进制文件的 hash 上，所以每次重新构建都会丢失授权；这些 recipe 改为使用只指明 bundle identifier 的 requirement 来签名，以后的每个构建都满足它。
+本 fork 的 macOS 构建使用 bundle identifier `org.1b2c.wezterm`，而不是上游的 `com.github.wez.wezterm`。原因在于隐私权限。这些构建使用 ad-hoc 签名，没有开发者证书，而 macOS 把隐私授权（Accessibility、Full Disk Access 等）绑定在应用的 designated requirement 上。普通的 ad-hoc 签名把这个 requirement 绑定在二进制文件的 hash 上，每次重新构建都会丢失授权。因此这些 recipe 签名时，requirement 中只写明 bundle identifier，以后每次安装新版本都不必重新授权。
 
 macOS 为每个 bundle identifier 保存一份权限记录。如果本 fork 沿用上游的 identifier，官方构建和 fork 构建就会争用这唯一的一份记录：给其中一个授予权限会替换另一个的权限，在两者之间切换时会反复要求重新授权。使用不同的 identifier，两种构建的权限就互不干扰。（共用 identifier 还会使官方构建满足本 fork 的 requirement，因为该 requirement 只指明 identifier。）这并不表示本 fork 主张作者身份：应用名称、版权声明和许可证都没有改变，WezTerm 仍然是 Wez Furlong 的作品。
 
@@ -172,9 +179,11 @@ macOS 为每个 bundle identifier 保存一份权限记录。如果本 fork 沿�
 
 ### Release tag 与历史
 
-本 fork 是 rebase 到上游之上的一组 patch，rebase 会改写历史。为了让 release tag 保持意义，在两次上游同步之间，历史只追加不改写：release 之后，新的 commit 放在这组 patch 的顶部，把 commit 移入它所属的分支要等到下一次上游同步，那时整组 patch 本来就要 rebase。因此在同一个上游基线之内，每个 release tag 都是 `master` 的祖先。
+本 fork 是叠在上游代码之上的一组 patch。每次同步上游时，都要通过 rebase 把这组 patch 重新应用到上游最新的代码上。rebase 会生成新的 commit，原有的 commit 不再出现在 `master` 的历史中。
 
-一次上游同步会打破这种祖先关系：早先 release 的 tag 指向 rebase 之前的那组 patch，它们作为对当时所发布内容的记录仍然有效。每个 release 的说明都会写明它所基于的上游 commit。本地构建报告它所派生自的 release，例如 `1b2c-1.4.0-dev.3+abcd1234`；如果祖先中没有任何 release，则报告 `1b2c-dev+abcd1234`。
+为了让 release tag 始终能在 `master` 的历史中找到，两次同步之间只在这组 patch 的末尾追加 commit，不改动已有的 commit。本应归入下层分支的改动，也先追加在末尾，到下一次同步时再随整组 patch 一起移入对应的分支。因此，同一次同步之后发布的所有 release，其 tag 都在 `master` 的历史中。
+
+同步之后，此前 release 的 tag 仍指向同步前的那组 commit，不再位于 `master` 的历史中，但它们依然准确记录了当时发布的内容。每个 release 的说明都写明它基于上游的哪个 commit。本机构建的版本号会注明它是在哪个 release 之后构建的：`1b2c-1.4.0-dev.3+abcd1234` 表示在 1.4.0 之后又有 3 个 commit，构建自 commit `abcd1234`。
 
 ## 许可证与署名
 

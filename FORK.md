@@ -1,14 +1,14 @@
-Chinese: [FORK.zh-CN.md](FORK.zh-CN.md)
+中文: [FORK.zh-CN.md](FORK.zh-CN.md)
 
 # FORK.md
 
-A personal fork of [WezTerm](https://github.com/wezterm/wezterm), maintained by
+A fork of [WezTerm](https://github.com/wezterm/wezterm), maintained by
 [0x1b2c](https://github.com/0x1b2c).
 
 ## Overview
 
-A personal fork, not a downstream distribution: no rebranding and no intent to
-become a distinct product. It does publish numbered releases with prebuilt
+Not a downstream distribution: no rebranding and no intent to become a
+distinct product. It does publish numbered releases with prebuilt
 packages and a Homebrew tap, so it can be installed without building it (see
 [Installing](#installing)). It carries a stack of patches
 on top of upstream WezTerm's `main`: daily-driver fixes and features for latency,
@@ -23,168 +23,153 @@ else is unchanged from upstream. For general WezTerm usage, see
 
 The patches are grouped by theme, each rooted in a real annoyance from daily
 use, most of it centered on WezTerm's multiplexer over SSH. Each entry names
-the problem first; the branch implementing the fix is linked at the end. One
-entry is one branch; the commits within a branch are cohesive and are not
-broken out here. Build and developer-experience patches, which have no
-user-facing symptom, are listed by branch name in the final section.
+the problem, then says what changes with this fork and what you need to know
+to use it; the branch carrying the patch is linked at the end, and how each
+fix works is explained in its commits. Build and developer-experience
+patches, which change nothing users see, are listed by branch name in the
+final section.
 
 ### The GUI freezes or lags badly under mux load
 
-- **Reconnecting to a mux server with many tabs open freezes the GUI.** A slow
-  write on the mux channel could block the read path and deadlock the whole
-  session. Fixed by splitting the mux client and server dispatch into
-  independent reader and writer tasks, with notifications handled in a separate
-  task.
+- **Reconnecting to a mux server with many tabs open freezes the GUI.**
+  Reconnecting now completes without freezing, with several windows and
+  around fifty tabs open.
   *Branch: [mux-deadlock-fix](https://github.com/0x1b2c/wezterm/compare/main...mux-deadlock-fix), submitted upstream as [PR #7771](https://github.com/wezterm/wezterm/pull/7771).*
 
-- **Resizing a window with many tabs open freezes the GUI.** Every `TabResized`
-  event triggered a full resync of all panes, an O(n²) cost that locked up the
-  interface. Fixed by skipping the redundant resync.
+- **Resizing a window with many tabs open freezes the GUI.** Resizing now
+  stays responsive with several windows and around fifty tabs open.
   *Branch: [skip-resync-on-tab-resized](https://github.com/0x1b2c/wezterm/compare/ssh-proxy-error-msg...skip-resync-on-tab-resized).*
 
 - **Programs that update the terminal title rapidly make the tab bar stutter.**
-  Frequent OSC title updates re-ran the `format-tab-title` machinery on every
-  update, thrashing the render loop. Fixed by caching and short-circuiting that
-  work.
-  *Branch: [tab-title-perf](https://github.com/0x1b2c/wezterm/compare/objc-cargo-clippy-lint...tab-title-perf).*
+  The tab bar stays smooth while programs such as Codex rewrite their
+  titles many times a second. When a program sets its title three or more
+  times within a fifth of a second, its tab shows that title as it is, without
+  calling a `format-tab-title` handler, until the title has stopped changing
+  for a second.
+  *Branch: [tab-title-perf](https://github.com/0x1b2c/wezterm/compare/build-tooling...tab-title-perf).*
 
-- **Keystrokes feel sluggish because rendering waits for the next scheduled
-  frame.** Fixed by triggering an immediate render poll right after a
-  keystroke, reducing perceived input latency.
+- **Keystrokes feel sluggish.** Typed characters now appear without waiting
+  for the next scheduled frame.
   *Branch: [keystroke-render-poll](https://github.com/0x1b2c/wezterm/compare/fork-base...keystroke-render-poll).*
 
 ### Declare window layouts once, spawn them on demand
 
 - **Setting up the same windows and tabs by hand every time is tedious.** This
-  fork adds Window Presets: declare window layouts in the config, then spawn
-  and kill them on demand via launcher flags, so a known-good working set is
-  always one command away. Includes a `SpawnCommand` `send_text` field so a
-  preset tab can auto-run a command in the default shell. A preset tab's
-  `cwd` may start with `~/`, and a tab that omits `cwd` opens in the previous
-  tab's directory, so a preset for one project names its directory once. A
-  tab may also give its directory as its first entry and a line to run in its
-  shell as `cmd`. A preset window's title starts with `[<preset name>]`, so
-  external tools can recognize it.
+  fork adds Window Presets: declare window layouts in the config, then open
+  and close them on demand from the launcher, so a configured set of windows
+  is always one command away; `startup_windows` opens chosen presets when the
+  mux server starts. A tab can name its directory, which may start with `~/`,
+  and a line to run in its shell; a tab that names no directory opens in the
+  previous tab's, so a preset for one project names its directory once. The
+  short form `{ '~/project', cmd = 'make watch' }` stands for
+  `{ cwd = '~/project', send_text = 'make watch\n' }`. A preset window's
+  title starts with `[<preset name>]`, so external tools can recognize it.
+  Presets are opened by the mux server, so these settings take effect once
+  the mux server runs this fork.
   *Usage: [docs/fork/window-presets.md](docs/fork/window-presets.md). Branch: [window-presets](https://github.com/0x1b2c/wezterm/compare/session-experience...window-presets).*
 
 - **There is no keybinding action to close a whole mux window at once**, which
-  resetting a layout needs. Added a Lua action that atomically kills a mux
-  window.
+  resetting a layout needs. `wezterm.mux.kill_window(mux_window)` now closes a mux
+  window and all its tabs in one step. Binding it to `Cmd+Shift+W` is
+  recommended:
+
+  ```lua
+  { key = 'w', mods = 'CMD|SHIFT', action = wezterm.action_callback(function(window)
+    wezterm.mux.kill_window(window:mux_window())
+  end) },
+  ```
   *Branch: [lua-kill-window](https://github.com/0x1b2c/wezterm/compare/tab-title-perf...lua-kill-window).*
 
 - **Closing one window can detach a mux domain that other windows are still
-  using.** Fixed by keeping the domain attached while any window still uses it.
+  using.** The domain now stays attached while any window still uses it.
   *Branch: [session-experience](https://github.com/0x1b2c/wezterm/compare/lua-kill-window...session-experience).*
 
 ### Typing over a slow connection is painful
 
-- **On a high-latency link, every keystroke costs a full round trip before it
-  appears on screen.** This gets especially bad when the mux server runs on a
-  Mac that has dozed off: macOS power management throttles the sleeping
-  machine, and each round trip stretches from milliseconds to seconds. This
-  fork adds Local Input Mode, a per-pane input mode that buffers keystrokes
-  client-side and ships the line to the PTY only on submit. It is a convenience tool aimed
-  at a minimally usable environment when the network is bad, not a perfect
-  line editor. It is the newest patch in the stack, with known edge cases
-  around paste and full key capture still open.
+- **On a high-latency link, every keystroke takes a full round trip before it
+  appears on screen.** It gets especially bad when the mux server runs on a
+  Mac that has dozed off, where each round trip stretches from milliseconds
+  to seconds. Local Input Mode, switched on per pane, lets you type and edit
+  a whole line locally and sends it only when you submit it. It is meant to
+  keep a minimally usable environment on a bad network, not to be a full line
+  editor. Known limitations: programs that keep repainting their input area,
+  such as Claude Code, draw over the local text; `Cmd+V` pastes straight to
+  the remote program; Tab completion, history search and other readline
+  features do not work while you type locally; and a multi-line submit into a
+  plain shell runs line by line. The usage guide describes them.
   *Usage: [docs/fork/local-input.md](docs/fork/local-input.md). Branch: [local-input](https://github.com/0x1b2c/wezterm/compare/window-presets...local-input).*
 
-### Programs in a mux pane should get the keys they asked for
+### Full Kitty Keyboard Protocol support
 
-- **In a mux pane, a program that turns on the kitty keyboard protocol stops
-  recognizing some keys, and Ctrl+Shift combinations cannot be typed at
-  all.** The mux server runs the pane's terminal, so it answered the
-  program's request and reported the protocol as on; but the GUI encodes the
-  keys, and it never learned the pane's keyboard mode, so it kept sending the
-  legacy encoding. A program that trusted the answer discarded legacy
-  sequences such as `ESC ^E` for Ctrl+Alt+E, and Shift+Enter arrived as a
-  plain Enter. The mux server now sends the pane's kitty keyboard flags to
-  its clients along with the rest of the pane's state, and the GUI encodes
-  keys for a mux pane with them, as it already did for a local pane. The
-  protocol takes effect only when `enable_kitty_keyboard` is `true` for both
-  the GUI and the mux server. Keys typed in the moment between a program
-  switching the protocol on or off and the GUI hearing of it still use the
-  previous encoding. Unlike legacy keys, kitty-encoded keys are not echoed
-  ahead of the server on a slow connection. They are sent without waiting for
-  the mux server, in order with the other keys, pastes and text typed into
-  the pane; for the same reason `pane:send_text` on a mux pane now returns
-  before the text reaches the mux server, and no longer reports a failure to
-  deliver it.
+- **Programs running in a mux server (for example when the default domain is a
+  unix domain, or over an SSH domain to a remote machine) miss keys once they
+  turn on the Kitty Keyboard Protocol, and Ctrl+Shift combinations cannot be
+  typed at all.** Upstream WezTerm supports the full protocol only when no mux
+  server is involved; with this fork, programs in a mux server get it too:
+  Ctrl+Shift combinations, Shift+Enter apart from Enter, Ctrl+I apart from
+  Tab, and Ctrl+Alt letter shortcuts all reach them. It needs
+  `enable_kitty_keyboard = true` in the config of both the GUI and the mux
+  server, and both running this fork with protocol version 46.3 or later (see
+  [Versioning](#versioning)). On a slow connection, keys sent in the Kitty
+  Keyboard Protocol encoding are not echoed ahead of the server.
+  `pane:send_text` on a pane in a mux server returns before the text reaches
+  the mux server and no longer reports a failure to deliver it.
   *Branch: [kitty-keyboard](https://github.com/0x1b2c/wezterm/compare/mux-startup...kitty-keyboard).*
 
 ### One session shared by several machines
 
 - **Returning to a machine after using the same mux session from another one
-  leaves its window showing content laid out for the other machine.** Each
-  pane has one size on the mux server, set by whichever client resized it
-  last, and a client only reports its size when its own window changes size,
-  so the content overflows a smaller window or leaves a larger one
-  half-filled until the window is resized by hand. The size now follows the
-  client that was used last, like tmux's `window-size latest`: when a window
-  gains focus, receives a key press, a click or a scroll, or switches tabs,
-  it reports its own size for its active tab if the panes do not already
-  have it. While two machines show the session at the same time, the one not
-  in use shows the other's size until it is used again.
+  leaves its window showing content laid out for the other machine's screen
+  size.** The
+  panes now take the size of the machine in use, like tmux's
+  `window-size latest`: as soon as a window gains focus, receives a key
+  press, a click or a scroll, or switches tabs, its panes are resized to fit
+  it. While two machines show the session at the same time, the one not in
+  use shows the other's size until it is used again.
 
 - **ssh in every pane suddenly stops finding its keys and asks for the key's
-  passphrase.** Panes reach ssh-agent through a link the mux server keeps
-  pointed at the agent of the most recently active client. A GUI started from
-  inside a pane inherits that pane's `SSH_AUTH_SOCK`, which is the link
-  itself, and reports it as its own agent; the mux server then pointed the
-  link at itself, and every pane lost the agent until the session was
-  restarted. The mux server now refuses a target that leads back to its own
-  link, directly or through other links, keeps the working one, and logs
-  `[fix:agent-self-link]`.
+  passphrase.** This happened after starting a WezTerm GUI from inside a
+  pane. Starting a GUI that way no longer takes ssh-agent away from the other
+  panes.
   *Branch: [shared-session](https://github.com/0x1b2c/wezterm/compare/windows-cross-build...shared-session).*
 
 ### The mux server should start reliably
 
-- **Right after login, the GUI quits with "Connection refused" and leaves a
-  mux server running with no window.** A GUI that finds no mux server starts
-  one, and then gave it about two and a half seconds to start listening. Just
-  after login the system is busy, and the server's startup plus the re-exec it
-  does to daemonize can take several seconds, so the GUI gave up and exited
-  while the server it had started came up a moment later. A client now keeps
-  trying to reach a server it has just started for up to 15 seconds.
+- **When the mux server is slow to start, the GUI quits with "Connection
+  refused" and leaves a mux server running with no window.** The GUI now waits
+  up to 15 seconds for a mux server it has just started, so it opens normally
+  even when the server takes a while to come up.
   *Branch: [mux-startup](https://github.com/0x1b2c/wezterm/compare/ssh-config-include...mux-startup).*
 
 ### WezTerm should not keep macOS busy in the background
 
 - **On macOS 26 and later, Spotlight's indexing service writes gigabytes a
-  day on WezTerm's behalf.** AppKit indexes every window of an app into
-  Spotlight and resubmits all of them whenever any window title changes, with
-  no coalescing; a terminal's titles change several times a second (shell
-  directories, program titles, progress characters), and Spotlight rejects
-  every one of those updates. WezTerm now turns this indexing off at launch
-  through AppKit's undocumented `NSEnableWindowTabIndexing` default,
-  registered so that `defaults write org.1b2c.wezterm
-  NSEnableWindowTabIndexing -bool true` can still turn it back on.
+  day on WezTerm's behalf.** A terminal's window titles change several times
+  a second, and macOS resubmits every window to Spotlight each time. WezTerm
+  now turns that indexing off. To turn it back on, run
+  `defaults write org.1b2c.wezterm NSEnableWindowTabIndexing -bool true`.
   *Branch: [spotlight-window-titles](https://github.com/0x1b2c/wezterm/compare/shared-session...spotlight-window-titles).*
 
 ### SSH domains should find hosts the way `ssh` does
 
 - **An ssh domain fails with "failed to lookup address information" for a
-  host that plain `ssh` connects to.** The host was defined in a file pulled
-  in by `Include ~/.ssh/config.local`. WezTerm did not expand `~` in an
-  `Include` argument, and it resolved a relative argument against the
-  directory of the file containing the `Include`, so the included file was
-  never read and the alias was treated as a literal host name. WezTerm now
-  follows `ssh_config(5)`: a leading `~` is the home directory, and a
-  relative path is resolved against `~/.ssh` in a user config file and
-  against `/etc/ssh` in the system config file, however deeply the includes
-  are nested. Globs keep working.
+  host that plain `ssh` connects to**, when the host is defined in a file
+  pulled in by `Include`, such as `Include ~/.ssh/config.local`. Ssh domains
+  now read included files the way `ssh` does (`ssh_config(5)`): a leading `~`
+  is the home directory, and a relative path is looked up in `~/.ssh` from
+  the user's config and in `/etc/ssh` from the system config, however deeply
+  the includes are nested. Globs keep working.
   *Branch: [ssh-config-include](https://github.com/0x1b2c/wezterm/compare/spotlight-window-titles...ssh-config-include).*
 
 ### Failures should explain themselves
 
 - **When the remote SSH proxy command fails, all you get is an opaque
-  connection error.** Fixed by surfacing a clear error message that says what
-  actually failed.
+  connection error.** The error now says what actually failed.
   *Branch: [ssh-proxy-error-msg](https://github.com/0x1b2c/wezterm/compare/keystroke-render-poll...ssh-proxy-error-msg).*
 
 ### Build and developer experience
 
-These carry no user-facing symptom; listed for completeness.
+These change nothing users see; listed for completeness.
 
 - **[fork-base](https://github.com/0x1b2c/wezterm/compare/mux-deadlock-fix...fork-base)**
   The fork's own documentation (this file, `docs/fork/`, the README banner),
@@ -211,10 +196,14 @@ These carry no user-facing symptom; listed for completeness.
   Whitelists the `objc` crate's `cargo-clippy` cfg in the workspace lint config
   to silence spurious warnings.
 
+- **[build-tooling](https://github.com/0x1b2c/wezterm/compare/objc-cargo-clippy-lint...build-tooling)**
+  Adds the `justfile` with the build, bundle, and signing recipes, which CI
+  also uses to sign the macOS package, and silences the "has no symbols"
+  warnings that macOS builds print for empty object files.
+
 - **[macos-bundle-identity](https://github.com/0x1b2c/wezterm/compare/local-input...macos-bundle-identity)**
-  Adds the `justfile` with the build and bundle recipes, and gives macOS
-  builds the fork's own bundle identifier with a stable ad-hoc signature (see
-  [Bundle identifier and signing](#bundle-identifier-and-signing)).
+  Gives macOS builds the fork's own bundle identifier with a stable ad-hoc
+  signature (see [Bundle identifier and signing](#bundle-identifier-and-signing)).
 
 - **[windows-cross-build](https://github.com/0x1b2c/wezterm/compare/macos-bundle-identity...windows-cross-build)**
   Cross-compiles and packages the Windows (MinGW) build with one command, and
@@ -226,12 +215,6 @@ These carry no user-facing symptom; listed for completeness.
   Actions builds the packages and publishes a release for every fork release
   tag, and the installation instructions for those releases (see
   [Installing](#installing) and [Versioning](#versioning)).
-
-Beyond the branches above, the stack also carries a few commits tagged
-`[local]`: a macOS `visibleFrame` window-geometry workaround, log tagging for
-crash attribution, and build-noise suppression. These are experimental or
-environment-specific attempts rather than user-facing features, and are not
-documented individually.
 
 ## Installing
 
@@ -280,11 +263,13 @@ source (see [Building](#building)).
 
 ## Building
 
-Fork builds number their mux protocol in a range of their own
-(`0x1b2c_UUNN`, with upstream's protocol version in `UU` and the fork's
-revision in `NN`), so a fork build refuses to connect to an upstream WezTerm
-mux server and the reverse, instead of exchanging messages neither side can
-decode. Run the same fork build at both ends of a mux connection.
+A fork build and an upstream WezTerm build cannot work together over the mux
+protocol: the fork changes the protocol, so the two are incompatible. The fork
+numbers its protocol version in a range of its own (`0x1b2c_UUNN`, with
+upstream's protocol version in `UU` and the fork's revision in `NN`), so each
+side recognizes the other as incompatible and refuses the connection with a
+clear message instead of misbehaving. Run fork builds with the same protocol version at
+both ends of a mux connection.
 
 Upstream ships CI configuration but no simple local build script. This fork adds
 a [`justfile`](justfile) at the repository root for that purpose. Run `just` to
@@ -314,8 +299,8 @@ builds are ad-hoc signed, without a developer certificate, and macOS binds
 privacy grants (Accessibility, Full Disk Access, and the like) to the app's
 designated requirement. A plain ad-hoc signature ties that requirement to the
 binary's hash, so every rebuild would lose its grants; the recipes instead sign
-with a requirement that names only the bundle identifier, which every future
-build satisfies.
+with a requirement that names only the bundle identifier, so installing a new
+build never asks for the grants again.
 
 macOS keeps one permission record per bundle identifier. If this fork reused
 upstream's identifier, official builds and fork builds would compete for that
@@ -374,9 +359,9 @@ base, every release tag is therefore an ancestor of `master`.
 An upstream sync breaks that ancestry: the tags of earlier releases point at
 the stack as it was before the rebase, and they stay valid as records of
 exactly what was released. Each release's notes name the upstream commit it
-is based on. A local build reports the release it descends from, such as
-`1b2c-1.4.0-dev.3+abcd1234`, or `1b2c-dev+abcd1234` when no release is among
-its ancestors.
+is based on. A local build's version says which release it was built after:
+`1b2c-1.4.0-dev.3+abcd1234` is three commits past 1.4.0, built from commit
+`abcd1234`.
 
 ## License and attribution
 

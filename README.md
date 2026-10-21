@@ -1,6 +1,6 @@
 # Wez's Terminal
 
-> **Personal fork by [0x1b2c](https://github.com/0x1b2c).** This fork makes
+> **A fork of WezTerm by [0x1b2c](https://github.com/0x1b2c).** This fork makes
 > WezTerm's multiplexer over SSH nicer to live in: it fixes GUI freezes and lag
 > under mux load, adds Window Presets to declare window layouts once and spawn
 > them on demand, and Local Input Mode to keep typing responsive on
