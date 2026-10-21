@@ -5,7 +5,12 @@
 # Release whose notes are the tag's message. A push to a `ci/**` branch runs
 # the same builds and only uploads the packages as Actions artifacts, for
 # debugging the workflow itself.
+#
+# Runs are named after what they build, `Release <tag>` for a tag and
+# `CI build <branch>` for a branch, because GitHub would otherwise show the
+# title of the commit that was pushed.
 name: fork_release
+run-name: ${{ github.ref_type == 'tag' && format('Release {0}', github.ref_name) || format('CI build {0}', github.ref_name) }}
 
 on:
   push:
