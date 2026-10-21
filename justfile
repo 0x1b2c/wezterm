@@ -19,34 +19,51 @@ build-arm64 profile="release":
 build-x86:
     cargo build --release --target x86_64-apple-darwin -p wezterm-gui -p wezterm -p wezterm-mux-server -p strip-ansi-escapes
 
+# The Docker daemon comes from WEZTERM_CROSS_DOCKER_CONTEXT (build on another host) and
+# WEZTERM_CROSS_REMOTE=1 (that daemon cannot see this checkout's files), meant to be
+# exported from justfile.local; when unset, DOCKER_CONTEXT/CROSS_REMOTE are inherited as is.
 # Cross-build static Linux binaries (wezterm + wezterm-mux-server) for x86_64-unknown-linux-musl.
 build-linux:
     #!/usr/bin/env bash
     set -euo pipefail
+    if [ -n "${WEZTERM_CROSS_DOCKER_CONTEXT:-}" ]; then
+        export DOCKER_CONTEXT="$WEZTERM_CROSS_DOCKER_CONTEXT"
+    fi
+    if [ -n "${WEZTERM_CROSS_REMOTE:-}" ]; then
+        export CROSS_REMOTE="$WEZTERM_CROSS_REMOTE"
+    fi
     if ! command -v cross >/dev/null 2>&1; then
         echo "Error: 'cross' not found. Install with: cargo install cross --git https://github.com/cross-rs/cross"
         exit 1
     fi
     if ! docker info >/dev/null 2>&1; then
-        echo "Error: Docker is not running. Start Docker Desktop first."
+        echo "Error: Docker is not reachable (DOCKER_CONTEXT=${DOCKER_CONTEXT:-default}). Start Docker or point DOCKER_CONTEXT at a running daemon."
         exit 1
     fi
-    cross build --release --target x86_64-unknown-linux-musl -p wezterm -p wezterm-mux-server
-    strip target/x86_64-unknown-linux-musl/release/wezterm 2>/dev/null || true
-    strip target/x86_64-unknown-linux-musl/release/wezterm-mux-server 2>/dev/null || true
+    # cross runs an x86_64 Linux toolchain inside its amd64-only image.
+    if ! rustup toolchain list | grep -q '^stable-x86_64-unknown-linux-gnu'; then
+        echo "Error: missing toolchain. Install with: rustup toolchain add stable-x86_64-unknown-linux-gnu --profile minimal --force-non-host"
+        exit 1
+    fi
+    export DOCKER_DEFAULT_PLATFORM=linux/amd64
+    # A host-side rustc wrapper such as sccache does not exist in the container,
+    # and stripping at link time avoids needing a Linux strip tool on the host.
+    export RUSTC_WRAPPER= CARGO_BUILD_RUSTC_WRAPPER= CARGO_PROFILE_RELEASE_STRIP=symbols
+    export CROSS_CONTAINER_OPTS="${CROSS_CONTAINER_OPTS:-} -e RUSTC_WRAPPER= -e CARGO_BUILD_RUSTC_WRAPPER= -e CARGO_PROFILE_RELEASE_STRIP=symbols"
+    # With a terminal on stdin cross requests an interactive exec, which a Docker
+    # daemon reached over an ssh context rejects with "received 409". The build
+    # reads no input, so detach stdin; output still goes to the terminal.
+    cross build --release --target x86_64-unknown-linux-musl -p wezterm -p wezterm-mux-server </dev/null
 
-# The Docker daemon comes from WEZTERM_WINDOWS_DOCKER_CONTEXT (build on another host) and
-# WEZTERM_WINDOWS_CROSS_REMOTE=1 (that daemon cannot see this checkout's files), meant to be
-# exported from justfile.local; when unset, DOCKER_CONTEXT/CROSS_REMOTE are inherited as is.
 # Cross-build Windows binaries for x86_64-pc-windows-gnu (MinGW).
 build-windows:
     #!/usr/bin/env bash
     set -euo pipefail
-    if [ -n "${WEZTERM_WINDOWS_DOCKER_CONTEXT:-}" ]; then
-        export DOCKER_CONTEXT="$WEZTERM_WINDOWS_DOCKER_CONTEXT"
+    if [ -n "${WEZTERM_CROSS_DOCKER_CONTEXT:-}" ]; then
+        export DOCKER_CONTEXT="$WEZTERM_CROSS_DOCKER_CONTEXT"
     fi
-    if [ -n "${WEZTERM_WINDOWS_CROSS_REMOTE:-}" ]; then
-        export CROSS_REMOTE="$WEZTERM_WINDOWS_CROSS_REMOTE"
+    if [ -n "${WEZTERM_CROSS_REMOTE:-}" ]; then
+        export CROSS_REMOTE="$WEZTERM_CROSS_REMOTE"
     fi
     if ! command -v cross >/dev/null 2>&1; then
         echo "Error: 'cross' not found. Install with: cargo install cross --git https://github.com/cross-rs/cross"

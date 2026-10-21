@@ -150,8 +150,8 @@ xattr -cr WezTerm.app
 - `just build-arm64`：原生 arm64 release 二进制文件（加上 `debug` 则为 debug 构建）
 - `just bundle-arm64`：用 arm64 二进制文件组装 `target/WezTerm.app`
 - `just build-x86`：`x86_64-apple-darwin` release 二进制文件
-- `just build-linux`：静态的 `x86_64-unknown-linux-musl` 二进制文件（需要 `cross` 和 Docker）
-- `just bundle-windows`：`x86_64-pc-windows-gnu`（MinGW）二进制文件，打包为 `target/WezTerm-windows.zip`（需要从 git 安装的 `cross` 和 Docker；要在另一台 Docker 主机上构建，从 `justfile.local` 导出 `WEZTERM_WINDOWS_DOCKER_CONTEXT`，当该主机看不到这个 checkout 时再加上 `WEZTERM_WINDOWS_CROSS_REMOTE=1`）
+- `just build-linux`：静态的 `x86_64-unknown-linux-musl` 二进制文件（需要 `cross` 和 Docker；使用与 `bundle-windows` 相同的 Docker 主机设置）
+- `just bundle-windows`：`x86_64-pc-windows-gnu`（MinGW）二进制文件，打包为 `target/WezTerm-windows.zip`（需要从 git 安装的 `cross` 和 Docker；要在另一台 Docker 主机上构建，从 `justfile.local` 导出 `WEZTERM_CROSS_DOCKER_CONTEXT`，当该主机看不到这个 checkout 时再加上 `WEZTERM_CROSS_REMOTE=1`）
 
 与特定机器相关的部署 recipe 放在不提交的 `justfile.local` 中，justfile 在它存在时会导入它；repo 只带有通用的构建与打包 recipe。
 
