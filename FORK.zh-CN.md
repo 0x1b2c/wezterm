@@ -10,6 +10,8 @@ English: [FORK.md](FORK.md) (the English edition is authoritative)
 
 每个功能位于各自的分支上，`master` 整合整组 patch。其中一个 patch 已提交给上游（见下文），其余仅存在于本 fork。除此之外的一切与上游保持一致。WezTerm 的一般用法见 <https://wezterm.org/>。
 
+使用本 fork 时遇到问题，请到 <https://github.com/0x1b2c/wezterm/issues> 报告，不要报给上游 WezTerm：问题可能出在本 fork 的某个 patch 上。
+
 ## 这个 fork 解决的问题
 
 这些 patch 按主题分组，每一项都源于日常使用中的一个实际困扰，其中大多数与经 SSH 使用 WezTerm 的 multiplexer 有关。每个条目先说明问题，再说明装上本 fork 之后有什么变化、使用时需要知道什么；条目末尾链接到承载该 patch 的分支，修复的具体做法见各分支的 commit。构建与开发体验方面的 patch 不改变用户看到的行为，按分支名列在最后一节。

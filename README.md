@@ -5,8 +5,9 @@
 > under mux load, adds Window Presets to declare window layouts once and spawn
 > them on demand, and Local Input Mode to keep typing responsive on
 > high-latency links. See [FORK.md](FORK.md) ([中文](FORK.zh-CN.md)) for the full list of problems
-> solved and build instructions. The rest of this README is unchanged from
-> upstream WezTerm.
+> solved and build instructions. Report problems with this fork's builds
+> [here](https://github.com/0x1b2c/wezterm/issues), not to upstream WezTerm.
+> The rest of this README is unchanged from upstream WezTerm.
 
 <img height="128" alt="WezTerm Icon" src="https://raw.githubusercontent.com/wezterm/wezterm/main/assets/icon/wezterm-icon.svg" align="left"> *A GPU-accelerated cross-platform terminal emulator and multiplexer written by <a href="https://github.com/wez">@wez</a> and implemented in <a href="https://www.rust-lang.org/">Rust</a>*
 

@@ -19,6 +19,10 @@ patch has been submitted upstream (see below); the rest are fork-only. Everythin
 else is unchanged from upstream. For general WezTerm usage, see
 <https://wezterm.org/>.
 
+Report problems with this fork's builds at
+<https://github.com/0x1b2c/wezterm/issues>, not to upstream WezTerm: a problem
+may come from one of the fork's patches.
+
 ## Problems this fork solves
 
 The patches are grouped by theme, each rooted in a real annoyance from daily
