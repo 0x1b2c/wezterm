@@ -47,30 +47,29 @@ English: [FORK.md](FORK.md) (the English edition is authoritative)
 ### mux pane 中的程序应当收到它们所请求的按键
 
 - **在 mux pane 中，开启 kitty keyboard protocol 的程序无法识别某些按键，Ctrl+Shift 组合键则完全无法输入。** pane 的终端运行在 mux server 上，所以由它应答程序的请求，并报告该协议已开启；但按键是由 GUI 编码的，而 GUI 从未得知 pane 的键盘模式，因此一直发送传统编码。信任了这个应答的程序会丢弃传统序列，例如 Ctrl+Alt+E 的 `ESC ^E`，Shift+Enter 到达时则变成一次普通的 Enter。现在，mux server 会把 pane 的 kitty keyboard flags 连同 pane 的其余状态一起发送给它的 client，GUI 据此为 mux pane 编码按键，与它对本地 pane 的做法一致。只有当 GUI 与 mux server 两端的 `enable_kitty_keyboard` 都为 `true` 时，该协议才会生效。程序开启或关闭该协议，到 GUI 得知这一变化之间的短暂时刻里输入的按键，仍使用之前的编码。与传统按键不同，kitty 编码的按键在慢速连接上不会先于 server 在本地回显。它们不等待 mux server 的响应就直接发送，并与输入到该 pane 的其他按键、粘贴内容和文本保持顺序；出于同样的原因，mux pane 上的 `pane:send_text` 现在会在文本到达 mux server 之前返回，不再报告投递失败。
-  *分支：尚未从 `master` 中拆分出来。*
+  *分支：[kitty-keyboard](https://github.com/0x1b2c/wezterm/compare/mux-startup...kitty-keyboard)。*
 
 ### 多台机器共享同一个 session
 
 - **在另一台机器上使用同一个 mux session 之后，回到原来的机器，其窗口里显示的是按另一台机器排版的内容。** 每个 pane 在 mux server 上只有一个尺寸，由最后一个调整它的 client 决定；而 client 只在自己的窗口尺寸变化时才报告尺寸，所以内容会超出较小的窗口，或者让较大的窗口只填满一半，直到手动调整窗口大小。现在，尺寸跟随最近使用的那个 client，与 tmux 的 `window-size latest` 相同：当窗口获得焦点、收到按键、点击或滚动，或者切换 tab 时，如果各 pane 还不是它的尺寸，它就为自己当前的 tab 报告自己的尺寸。当两台机器同时显示这个 session 时，没有在使用的那一台显示的是另一台的尺寸，直到它再次被使用。
-  *分支：尚未从 `master` 中拆分出来。*
 
 - **每个 pane 里的 ssh 突然找不到自己的密钥，并要求输入密钥的 passphrase。** pane 通过 mux server 维护的一条链接访问 ssh-agent，这条链接始终指向最近活跃的 client 的 agent。从某个 pane 内部启动的 GUI 会继承该 pane 的 `SSH_AUTH_SOCK`，也就是这条链接本身，并把它当作自己的 agent 报告；mux server 随后把链接指向了它自己，于是所有 pane 都失去了 agent，直到 session 重新启动。现在，mux server 会拒绝直接或经由其他链接绕回自身链接的目标，保留原来可用的目标，并记录 `[fix:agent-self-link]` 日志。
-  *分支：尚未从 `master` 中拆分出来。*
+  *分支：[shared-session](https://github.com/0x1b2c/wezterm/compare/windows-cross-build...shared-session)。*
 
 ### mux server 应当可靠地启动
 
 - **登录之后不久，GUI 以 "Connection refused" 退出，并留下一个没有窗口的 mux server 在运行。** 找不到 mux server 的 GUI 会自己启动一个，然后只给它大约两秒半的时间开始监听。刚登录时系统很忙，server 的启动加上它为了转入 daemon 而做的 re-exec 可能需要好几秒，于是 GUI 放弃并退出，而它启动的 server 过一会儿才就绪。现在，client 对自己刚启动的 server 会持续尝试连接，最长 15 秒。
-  *分支：尚未从 `master` 中拆分出来。*
+  *分支：[mux-startup](https://github.com/0x1b2c/wezterm/compare/ssh-config-include...mux-startup)。*
 
 ### WezTerm 不应让 macOS 在后台忙个不停
 
 - **在 macOS 26 及更高版本上，Spotlight 的索引服务每天因 WezTerm 写入数 GB 数据。** AppKit 会把一个应用的每个窗口都索引到 Spotlight，并且在任何窗口的标题变化时重新提交全部窗口，没有任何合并；终端的标题每秒变化好几次（shell 目录、程序标题、进度字符），而 Spotlight 会拒绝其中的每一次更新。现在，WezTerm 在启动时通过 AppKit 未公开的 `NSEnableWindowTabIndexing` 默认值关闭这项索引，并以注册默认值的方式设置，因此仍可用 `defaults write org.1b2c.wezterm NSEnableWindowTabIndexing -bool true` 将其重新打开。
-  *分支：尚未从 `master` 中拆分出来。*
+  *分支：[spotlight-window-titles](https://github.com/0x1b2c/wezterm/compare/shared-session...spotlight-window-titles)。*
 
 ### SSH domain 应当像 `ssh` 一样查找主机
 
 - **对于普通 `ssh` 能连上的主机，ssh domain 却报错 "failed to lookup address information"。** 这台主机定义在由 `Include ~/.ssh/config.local` 引入的文件中。WezTerm 不展开 `Include` 参数中的 `~`，并且把相对路径参数相对于包含该 `Include` 的文件所在目录解析，所以被引入的文件从未被读取，别名被当作字面的主机名。现在 WezTerm 遵循 `ssh_config(5)`：开头的 `~` 表示 home 目录；相对路径在用户配置文件中相对于 `~/.ssh` 解析，在系统配置文件中相对于 `/etc/ssh` 解析，无论 include 嵌套多深。glob 仍然有效。
-  *分支：尚未从 `master` 中拆分出来。*
+  *分支：[ssh-config-include](https://github.com/0x1b2c/wezterm/compare/spotlight-window-titles...ssh-config-include)。*
 
 ### 失败应当自己说明原因
 
@@ -99,6 +98,9 @@ English: [FORK.md](FORK.md) (the English edition is authoritative)
 
 - **[windows-cross-build](https://github.com/0x1b2c/wezterm/compare/macos-bundle-identity...windows-cross-build)**
   用一条命令交叉编译并打包 Windows（MinGW）构建，并把与特定机器相关的部署 recipe 移入不提交的 `justfile.local`。
+
+- **[fork-release](https://github.com/0x1b2c/wezterm/compare/kitty-keyboard...fork-release)**
+  发布相关的部分：`wezterm --version` 说明所属的 fork release 与所用的 mux protocol，本机构建报告它所源自的 release，GitHub Actions 构建各平台的软件包并在每个 fork release tag 上发布 release，以及这些 release 的安装说明（见[安装](#安装)与[版本号](#版本号)）。
 
 除上述分支之外，这组 patch 还带有少量标记为 `[local]` 的 commit：针对 macOS `visibleFrame` 窗口几何的绕过方法、为定位崩溃而加的日志标记，以及对构建噪音的抑制。这些是实验性的或与特定环境相关的尝试，不是面向用户的功能，因此不逐个说明。
 

@@ -110,7 +110,7 @@ user-facing symptom, are listed by branch name in the final section.
   the pane; for the same reason `pane:send_text` on a mux pane now returns
   before the text reaches the mux server, and no longer reports a failure to
   deliver it.
-  *Branch: not yet split out from `master`.*
+  *Branch: [kitty-keyboard](https://github.com/0x1b2c/wezterm/compare/mux-startup...kitty-keyboard).*
 
 ### One session shared by several machines
 
@@ -125,7 +125,6 @@ user-facing symptom, are listed by branch name in the final section.
   it reports its own size for its active tab if the panes do not already
   have it. While two machines show the session at the same time, the one not
   in use shows the other's size until it is used again.
-  *Branch: not yet split out from `master`.*
 
 - **ssh in every pane suddenly stops finding its keys and asks for the key's
   passphrase.** Panes reach ssh-agent through a link the mux server keeps
@@ -136,7 +135,7 @@ user-facing symptom, are listed by branch name in the final section.
   restarted. The mux server now refuses a target that leads back to its own
   link, directly or through other links, keeps the working one, and logs
   `[fix:agent-self-link]`.
-  *Branch: not yet split out from `master`.*
+  *Branch: [shared-session](https://github.com/0x1b2c/wezterm/compare/windows-cross-build...shared-session).*
 
 ### The mux server should start reliably
 
@@ -147,7 +146,7 @@ user-facing symptom, are listed by branch name in the final section.
   does to daemonize can take several seconds, so the GUI gave up and exited
   while the server it had started came up a moment later. A client now keeps
   trying to reach a server it has just started for up to 15 seconds.
-  *Branch: not yet split out from `master`.*
+  *Branch: [mux-startup](https://github.com/0x1b2c/wezterm/compare/ssh-config-include...mux-startup).*
 
 ### WezTerm should not keep macOS busy in the background
 
@@ -160,7 +159,7 @@ user-facing symptom, are listed by branch name in the final section.
   through AppKit's undocumented `NSEnableWindowTabIndexing` default,
   registered so that `defaults write org.1b2c.wezterm
   NSEnableWindowTabIndexing -bool true` can still turn it back on.
-  *Branch: not yet split out from `master`.*
+  *Branch: [spotlight-window-titles](https://github.com/0x1b2c/wezterm/compare/shared-session...spotlight-window-titles).*
 
 ### SSH domains should find hosts the way `ssh` does
 
@@ -174,7 +173,7 @@ user-facing symptom, are listed by branch name in the final section.
   relative path is resolved against `~/.ssh` in a user config file and
   against `/etc/ssh` in the system config file, however deeply the includes
   are nested. Globs keep working.
-  *Branch: not yet split out from `master`.*
+  *Branch: [ssh-config-include](https://github.com/0x1b2c/wezterm/compare/spotlight-window-titles...ssh-config-include).*
 
 ### Failures should explain themselves
 
@@ -220,6 +219,13 @@ These carry no user-facing symptom; listed for completeness.
 - **[windows-cross-build](https://github.com/0x1b2c/wezterm/compare/macos-bundle-identity...windows-cross-build)**
   Cross-compiles and packages the Windows (MinGW) build with one command, and
   moves machine-specific deploy recipes into the uncommitted `justfile.local`.
+
+- **[fork-release](https://github.com/0x1b2c/wezterm/compare/kitty-keyboard...fork-release)**
+  Release plumbing: `wezterm --version` names the fork release and the mux
+  protocol it speaks, local builds report the release they descend from, GitHub
+  Actions builds the packages and publishes a release for every fork release
+  tag, and the installation instructions for those releases (see
+  [Installing](#installing) and [Versioning](#versioning)).
 
 Beyond the branches above, the stack also carries a few commits tagged
 `[local]`: a macOS `visibleFrame` window-geometry workaround, log tagging for
